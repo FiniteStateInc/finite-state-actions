@@ -25,7 +25,7 @@ export type VexStatus =
 
 export type PriorityBand = 'P0' | 'P1' | 'P2' | 'P3'
 
-export type GateMode = 'severity' | 'risk' | 'epss' | 'kev' | 'count'
+export type GateMode = 'severity' | 'risk' | 'epss' | 'kev' | 'count' | 'delta' | 'threshold' | 'triage'
 
 export type SbomFormat = 'cyclonedx' | 'spdx'
 
@@ -138,6 +138,7 @@ export interface GateModeResult {
   mode: GateMode
   passed: boolean
   reason: string
+  data?: Record<string, unknown>
 }
 
 export interface GateResult {
