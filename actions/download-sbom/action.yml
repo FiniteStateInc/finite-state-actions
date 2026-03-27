@@ -1,0 +1,40 @@
+name: 'Finite State Download SBOM'
+description: 'Export CycloneDX or SPDX SBOM from Finite State with optional artifact upload'
+author: 'Finite State Inc.'
+branding:
+  icon: 'download'
+  color: 'blue'
+inputs:
+  version-id:
+    description: 'Version ID override (falls back to setup context)'
+    required: false
+  format:
+    description: 'SBOM format: cyclonedx or spdx'
+    required: false
+    default: 'cyclonedx'
+  include-vex:
+    description: 'Include VEX data in the SBOM export'
+    required: false
+    default: 'true'
+  output-file:
+    description: 'Output file path for the downloaded SBOM'
+    required: false
+    default: 'sbom.json'
+  upload-artifact:
+    description: 'Upload the SBOM as a workflow artifact'
+    required: false
+    default: 'true'
+  artifact-name:
+    description: 'Name of the workflow artifact'
+    required: false
+    default: 'finite-state-sbom'
+outputs:
+  file:
+    description: 'Path to the downloaded SBOM file'
+  artifact-name:
+    description: 'Name of the uploaded artifact (if upload-artifact is true)'
+  component-count:
+    description: 'Number of components in the SBOM'
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
