@@ -1,0 +1,67 @@
+name: 'Finite State Quality Gate'
+description: 'Evaluate findings against configurable quality gates (delta, threshold, triage-priority)'
+author: 'Finite State Inc.'
+branding:
+  icon: 'shield'
+  color: 'red'
+inputs:
+  mode:
+    description: 'Gate mode(s): delta, threshold, triage-priority (or comma-separated combination)'
+    required: true
+  report-dir:
+    description: 'Path to fs-report output directory'
+    required: false
+  summary-json:
+    description: 'JSON string from run-report summary-json output'
+    required: false
+  max-new-critical:
+    description: 'Delta mode: max new critical findings allowed (-1 = unlimited)'
+    required: false
+    default: '0'
+  max-new-high:
+    description: 'Delta mode: max new high findings allowed (-1 = unlimited)'
+    required: false
+    default: '0'
+  max-new-medium:
+    description: 'Delta mode: max new medium findings allowed (-1 = unlimited)'
+    required: false
+    default: '-1'
+  max-critical:
+    description: 'Threshold mode: max total critical findings allowed'
+    required: false
+  max-high:
+    description: 'Threshold mode: max total high findings allowed'
+    required: false
+  max-total:
+    description: 'Threshold mode: max total findings allowed'
+    required: false
+  fail-on-p0:
+    description: 'Triage mode: fail if P0 count exceeds max-p0'
+    required: false
+    default: 'true'
+  fail-on-p1:
+    description: 'Triage mode: fail if P1 count exceeds max-p1'
+    required: false
+    default: 'false'
+  max-p0:
+    description: 'Triage mode: max P0 findings allowed (-1 = unlimited)'
+    required: false
+    default: '0'
+  max-p1:
+    description: 'Triage mode: max P1 findings allowed (-1 = unlimited)'
+    required: false
+    default: '-1'
+  ai:
+    description: 'Enable AI-enhanced gate analysis'
+    required: false
+    default: 'false'
+outputs:
+  result:
+    description: 'Gate result: pass or fail'
+  summary:
+    description: 'Human-readable summary of gate evaluation'
+  details-json:
+    description: 'JSON array of per-mode gate results'
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
