@@ -1,0 +1,78 @@
+name: 'Finite State Run Report'
+description: 'Run fs-report recipes, parse outputs, and upload artifacts'
+author: 'Finite State Inc.'
+branding:
+  icon: 'file-text'
+  color: 'blue'
+inputs:
+  recipe:
+    description: 'Comma-separated recipe names to run'
+    required: true
+  project-id:
+    description: 'Project ID override (falls back to setup context)'
+    required: false
+  version-id:
+    description: 'Version ID override (falls back to setup context)'
+    required: false
+  baseline-version:
+    description: 'Baseline version ID for comparison recipes'
+    required: false
+  current-version:
+    description: 'Current version ID for comparison recipes'
+    required: false
+  period:
+    description: 'Time period filter (e.g. 30d, 7d)'
+    required: false
+  cve:
+    description: 'CVE ID filter'
+    required: false
+  finding-types:
+    description: 'Comma-separated finding types to include'
+    required: false
+  open-only:
+    description: 'Only include open findings'
+    required: false
+    default: 'true'
+  scoring-file:
+    description: 'Path to scoring YAML file'
+    required: false
+  ai:
+    description: 'Enable AI-powered analysis'
+    required: false
+    default: 'false'
+  ai-prompts:
+    description: 'Enable AI prompt output'
+    required: false
+    default: 'false'
+  output-dir:
+    description: 'Directory to write report outputs'
+    required: false
+    default: './fs-reports'
+  fs-report-version:
+    description: 'Pin fs-report to a specific version (e.g. ==1.2.3)'
+    required: false
+  cache-ttl:
+    description: 'Cache TTL in days'
+    required: false
+    default: '1'
+  extra-args:
+    description: 'Additional arguments passed through to fs-report'
+    required: false
+outputs:
+  report-dir:
+    description: 'Path to the directory containing report outputs'
+  artifact-name:
+    description: 'Name of the uploaded GitHub Actions artifact'
+  summary-json:
+    description: 'JSON string of the parsed ReportSummary'
+  critical-count:
+    description: 'Number of P0 (critical triage band) findings'
+  high-count:
+    description: 'Number of P1 (high triage band) findings'
+  new-findings:
+    description: 'Number of new findings from version delta'
+  fixed-findings:
+    description: 'Number of fixed findings from version delta'
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
