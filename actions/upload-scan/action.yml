@@ -1,0 +1,46 @@
+name: 'Finite State Upload Scan'
+description: 'Upload firmware, SBOMs, or third-party scan results to Finite State'
+author: 'Finite State Inc.'
+branding:
+  icon: 'upload-cloud'
+  color: 'blue'
+inputs:
+  type:
+    description: 'Scan type: sca, sast, config, vulnerability-analysis, sbom, third-party'
+    required: true
+  file:
+    description: 'Path to the file to upload'
+    required: true
+  project-id:
+    description: 'Project ID override (falls back to setup context)'
+    required: false
+  version:
+    description: 'Version name — creates a new version (mutually exclusive with version-id)'
+    required: false
+  version-id:
+    description: 'Existing version ID (mutually exclusive with version)'
+    required: false
+  scanner-type:
+    description: 'Scanner type for third-party scans (e.g. grype, trivy)'
+    required: false
+  sbom-format:
+    description: 'SBOM format: cdx or spdx'
+    required: false
+  wait-for-completion:
+    description: 'Poll until scan is done'
+    required: false
+    default: 'true'
+  timeout:
+    description: 'Maximum wait time in seconds'
+    required: false
+    default: '600'
+outputs:
+  scan-id:
+    description: 'ID of the created scan'
+  version-id:
+    description: 'ID of the project version'
+  scan-status:
+    description: 'Final scan status'
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
