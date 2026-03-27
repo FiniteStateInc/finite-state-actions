@@ -1,0 +1,32 @@
+name: 'Finite State Setup'
+description: 'Authenticate and configure Finite State context for downstream actions'
+author: 'Finite State Inc.'
+branding:
+  icon: 'shield'
+  color: 'blue'
+inputs:
+  api-token:
+    description: 'Finite State API token'
+    required: true
+  domain:
+    description: 'Finite State platform domain'
+    required: false
+    default: 'app.finitestate.io'
+  project-id:
+    description: 'Default project ID for subsequent actions'
+    required: false
+  version-id:
+    description: 'Default version ID for subsequent actions'
+    required: false
+outputs:
+  org-name:
+    description: 'Organization name'
+  user:
+    description: 'Authenticated username'
+  project-id:
+    description: 'Project ID (echoed or resolved)'
+  version-id:
+    description: 'Version ID (echoed or resolved)'
+runs:
+  using: 'node20'
+  main: 'dist/index.js'

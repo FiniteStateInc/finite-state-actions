@@ -1,0 +1,95 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+// ── Mock @actions/core ─────────────────────────────────────────────────────────
+
+vi.mock('@actions/core', () => ({
+  getInput: vi.fn(),
+  setOutput: vi.fn(),
+  setFailed: vi.fn(),
+  setSecret: vi.fn(),
+  exportVariable: vi.fn(),
+  info: vi.fn(),
+}))
+
+// ── Mock @finite-state/core ────────────────────────────────────────────────────
+
+const mockGetAuthUser = vi.fn()
+
+vi.mock('@finite-state/core', () => ({
+  FsClient: vi.fn().mockImplementation(() => ({
+    getAuthUser: mockGetAuthUser,
+  })),
+  writeSetupContext: vi.fn(),
+}))
+
+// ── Imports (after mocks) ──────────────────────────────────────────────────────
+
+import * as core from '@actions/core'
+import { FsClient, writeSetupContext } from '@finite-state/core'
+import { run } from '../src/main'
+
+// ── Tests ──────────────────────────────────────────────────────────────────────
+
+describe('setup action', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        'api-token': 'test-token',
+        domain: 'app.finitestate.io',
+        'project-id': 'proj-123',
+        'version-id': 'ver-456',
+      }
+      return inputs[name] ?? ''
+    })
+  })
+
+  it('validates auth and exports context', async () => {
+    mockGetAuthUser.mockResolvedValue({
+      id: 'user-1',
+      email: 'testuser@example.com',
+      organizationId: 'org-1',
+    })
+
+    await run()
+
+    // FsClient was constructed with correct config
+    expect(FsClient).toHaveBeenCalledWith({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+    })
+
+    // getAuthUser was called
+    expect(mockGetAuthUser).toHaveBeenCalled()
+
+    // writeSetupContext was called
+    expect(writeSetupContext).toHaveBeenCalledWith({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      projectId: 'proj-123',
+      versionId: 'ver-456',
+    })
+
+    // outputs were set
+    expect(core.setOutput).toHaveBeenCalledWith('user', 'testuser@example.com')
+    expect(core.setOutput).toHaveBeenCalledWith('org-name', 'org-1')
+    expect(core.setOutput).toHaveBeenCalledWith('project-id', 'proj-123')
+    expect(core.setOutput).toHaveBeenCalledWith('version-id', 'ver-456')
+
+    // no failure
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('fails with clear error on invalid auth (401)', async () => {
+    mockGetAuthUser.mockRejectedValue(
+      new Error('Unauthorized (401): Invalid or missing API token.'),
+    )
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(
+      expect.stringContaining('Unauthorized (401)'),
+    )
+  })
+})
