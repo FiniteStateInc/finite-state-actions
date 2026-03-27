@@ -1,0 +1,42 @@
+name: 'Finite State PR Comment'
+description: 'Post findings summary as a PR comment with edit-in-place support'
+author: 'Finite State Inc.'
+branding:
+  icon: 'message-square'
+  color: 'blue'
+inputs:
+  report-dir:
+    description: 'Path to fs-report output directory'
+    required: false
+  summary-json:
+    description: 'JSON string from run-report summary-json output'
+    required: false
+  template:
+    description: 'Comment template: summary | detailed | triage | comparison | custom'
+    required: false
+    default: 'summary'
+  custom-template:
+    description: 'Path to a custom Handlebars/Markdown template file'
+    required: false
+  gate-result:
+    description: 'Quality gate result: pass or fail'
+    required: false
+  gate-summary:
+    description: 'Human-readable gate evaluation text'
+    required: false
+  comment-tag:
+    description: 'Unique HTML comment tag used for edit-in-place matching'
+    required: false
+    default: 'finite-state'
+  collapse-details:
+    description: 'Wrap verbose sections in a <details> tag'
+    required: false
+    default: 'true'
+outputs:
+  comment-id:
+    description: 'ID of the created or updated PR comment'
+  comment-url:
+    description: 'URL of the created or updated PR comment'
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
