@@ -149,9 +149,10 @@ export interface GateResult {
 // ── Setup / Context ────────────────────────────────────────────────────────────
 
 export interface SetupContext {
-  apiUrl: string
-  token: string
-  organizationId: string
+  apiToken: string
+  domain: string
+  projectId?: string
+  versionId?: string
 }
 
 // ── Helper Functions ───────────────────────────────────────────────────────────
