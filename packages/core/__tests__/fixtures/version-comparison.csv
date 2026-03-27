@@ -1,0 +1,4 @@
+Change Type,CVE ID,Severity,Component
+NEW,CVE-2024-1111,CRITICAL,openssl@3.0.2
+NEW,CVE-2024-2222,HIGH,curl@8.1.0
+FIXED,CVE-2023-3333,HIGH,busybox@1.35

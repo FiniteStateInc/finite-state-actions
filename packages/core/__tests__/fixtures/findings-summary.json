@@ -1,0 +1,10 @@
+{
+  "bySeverity": {
+    "CRITICAL": 5,
+    "HIGH": 20,
+    "MEDIUM": 45,
+    "LOW": 12,
+    "NONE": 3
+  },
+  "total": 85
+}

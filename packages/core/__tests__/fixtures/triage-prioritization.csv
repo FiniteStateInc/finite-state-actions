@@ -1,0 +1,5 @@
+CVE ID,Component,Severity,Priority Band,Reachable,Has Exploit,In KEV,Attack Vector,EPSS Percentile
+CVE-2024-1234,openssl@3.0.2,CRITICAL,P0,true,true,true,NETWORK,0.97
+CVE-2024-5678,curl@8.1.0,HIGH,P1,true,false,false,NETWORK,0.92
+CVE-2024-9999,busybox@1.36,MEDIUM,P2,false,false,false,LOCAL,0.10
+CVE-2024-0001,zlib@1.2.13,LOW,P3,false,false,false,LOCAL,0.02
