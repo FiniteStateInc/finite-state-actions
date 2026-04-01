@@ -75,6 +75,7 @@ You can also reference a project by name instead of ID:
 - uses: FiniteStateInc/finite-state-actions/actions/setup@v1
   with:
     api-token: ${{ secrets.FS_API_TOKEN }}
+    domain: ${{ vars.FS_DOMAIN }}
     project-name: MyProject
 ```
 
