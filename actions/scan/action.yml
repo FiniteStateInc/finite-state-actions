@@ -1,0 +1,29 @@
+name: 'Finite State Scan'
+description: 'Scan project dependencies with fs-cli and upload results to the Finite State platform'
+author: 'Finite State Inc.'
+branding:
+  icon: 'search'
+  color: 'blue'
+inputs:
+  dir:
+    description: 'Directory to scan'
+    required: false
+    default: '.'
+  project-id:
+    description: 'Project ID (UUID) or name. Overrides value from setup.'
+    required: false
+  version:
+    description: 'Version label for the scan (e.g. v1.2.3 or pr-42)'
+    required: true
+  name:
+    description: 'Project name sent to the platform. Defaults to repository name.'
+    required: false
+  extra-args:
+    description: 'Additional arguments passed to fs-cli scan'
+    required: false
+outputs:
+  exit-code:
+    description: 'Exit code from fs-cli scan'
+runs:
+  using: 'node20'
+  main: 'dist/index.js'

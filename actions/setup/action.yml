@@ -28,5 +28,16 @@ outputs:
   version-id:
     description: 'Version ID (echoed or resolved)'
 runs:
-  using: 'node20'
-  main: 'dist/index.js'
+  using: 'composite'
+  steps:
+    - name: Run setup
+      shell: bash
+      run: node '${{ github.action_path }}/dist/index.js'
+      env:
+        INPUT_API-TOKEN: ${{ inputs.api-token }}
+        INPUT_DOMAIN: ${{ inputs.domain }}
+        INPUT_PROJECT-ID: ${{ inputs.project-id }}
+        INPUT_VERSION-ID: ${{ inputs.version-id }}
+    - name: Install fs-cli
+      shell: bash
+      run: curl -fsSL https://raw.githubusercontent.com/FiniteStateInc/customer-resources/main/02-ci-cd-automation/fs-cli/install.sh | sh

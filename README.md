@@ -4,14 +4,15 @@ A collection of GitHub Actions for integrating [Finite State](https://finitestat
 
 ## Actions
 
-| Action                                   | Description                                                               |
-| ---------------------------------------- | ------------------------------------------------------------------------- |
-| [setup](./actions/setup)                 | Authenticate with the Finite State platform and configure the environment |
-| [upload-scan](./actions/upload-scan)     | Upload a firmware or software artifact for security scanning              |
-| [run-report](./actions/run-report)       | Generate security reports using fs-report                                 |
-| [quality-gate](./actions/quality-gate)   | Fail the build if findings exceed configurable thresholds                 |
-| [pr-comment](./actions/pr-comment)       | Post a findings summary as a pull request comment                         |
-| [download-sbom](./actions/download-sbom) | Download the SBOM for a project version                                   |
+| Action                                   | Description                                                                |
+| ---------------------------------------- | -------------------------------------------------------------------------- |
+| [setup](./actions/setup)                 | Authenticate with the Finite State platform, configure env, install fs-cli |
+| [scan](./actions/scan)                   | Scan project dependencies with fs-cli and upload results                   |
+| [upload-scan](./actions/upload-scan)     | Upload a firmware or software artifact for security scanning               |
+| [run-report](./actions/run-report)       | Generate security reports using fs-report                                  |
+| [quality-gate](./actions/quality-gate)   | Fail the build if findings exceed configurable thresholds                  |
+| [pr-comment](./actions/pr-comment)       | Post a findings summary as a pull request comment                          |
+| [download-sbom](./actions/download-sbom) | Download the SBOM for a project version                                    |
 
 ## Quick Start
 
@@ -39,9 +40,9 @@ Since the actions live in a monorepo, reference them with the full path:
 FiniteStateInc/finite-state-actions/actions/<action-name>@v1
 ```
 
-### Source scan with fs-cli
+### Source scan
 
-The simplest setup uses [fs-cli](https://github.com/FiniteStateInc/finite-state-fs-cli) to scan your project dependencies and upload the results to the Finite State platform:
+The simplest setup uses the `setup` and `scan` actions to scan your project dependencies and upload the results to the Finite State platform:
 
 ```yaml
 name: Finite State Security Scan
@@ -57,17 +58,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install fs-cli
-        run: curl -fsSL https://raw.githubusercontent.com/FiniteStateInc/customer-resources/main/02-ci-cd-automation/fs-cli/install.sh | sh
+      - uses: FiniteStateInc/finite-state-actions/actions/setup@v1
+        with:
+          api-token: ${{ secrets.FS_API_TOKEN }}
+          domain: ${{ vars.FS_DOMAIN }}
+          project-id: ${{ vars.FS_PROJECT_ID }}
 
-      - name: Scan dependencies
-        run: |
-          fs-cli scan . \
-            --token "${{ secrets.FS_API_TOKEN }}" \
-            --endpoint "https://${{ vars.FS_DOMAIN }}" \
-            --name "${{ github.event.repository.name }}" \
-            --project-id "${{ vars.FS_PROJECT_ID }}" \
-            --version "${{ github.ref_name }}"
+      - uses: FiniteStateInc/finite-state-actions/actions/scan@v1
+        with:
+          version: ${{ github.ref_name }}
 ```
 
 ### PR gate with reports
@@ -89,23 +88,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install fs-cli
-        run: curl -fsSL https://raw.githubusercontent.com/FiniteStateInc/customer-resources/main/02-ci-cd-automation/fs-cli/install.sh | sh
-
-      - name: Scan dependencies
-        run: |
-          fs-cli scan . \
-            --token "${{ secrets.FS_API_TOKEN }}" \
-            --endpoint "https://${{ vars.FS_DOMAIN }}" \
-            --name "${{ github.event.repository.name }}" \
-            --project-id "${{ vars.FS_PROJECT_ID }}" \
-            --version "pr-${{ github.event.number }}"
-
       - uses: FiniteStateInc/finite-state-actions/actions/setup@v1
         with:
           api-token: ${{ secrets.FS_API_TOKEN }}
           domain: ${{ vars.FS_DOMAIN }}
           project-id: ${{ vars.FS_PROJECT_ID }}
+
+      - uses: FiniteStateInc/finite-state-actions/actions/scan@v1
+        with:
+          version: pr-${{ github.event.number }}
 
       - uses: FiniteStateInc/finite-state-actions/actions/run-report@v1
         id: report
@@ -143,23 +134,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install fs-cli
-        run: curl -fsSL https://raw.githubusercontent.com/FiniteStateInc/customer-resources/main/02-ci-cd-automation/fs-cli/install.sh | sh
-
-      - name: Scan dependencies
-        run: |
-          fs-cli scan . \
-            --token "${{ secrets.FS_API_TOKEN }}" \
-            --endpoint "https://${{ vars.FS_DOMAIN }}" \
-            --name "${{ github.event.repository.name }}" \
-            --project-id "${{ vars.FS_PROJECT_ID }}" \
-            --version "${{ github.ref_name }}"
-
       - uses: FiniteStateInc/finite-state-actions/actions/setup@v1
         with:
           api-token: ${{ secrets.FS_API_TOKEN }}
           domain: ${{ vars.FS_DOMAIN }}
           project-id: ${{ vars.FS_PROJECT_ID }}
+
+      - uses: FiniteStateInc/finite-state-actions/actions/scan@v1
+        with:
+          version: ${{ github.ref_name }}
 
       - uses: FiniteStateInc/finite-state-actions/actions/download-sbom@v1
         with:
@@ -173,9 +156,9 @@ jobs:
 Actions pass data via step outputs and environment variables. The `setup` action exports `FS_API_TOKEN` and `FS_DOMAIN` as environment variables for the entire job.
 
 ```
-fs-cli scan (uploads to platform)
+setup (validates auth, exports env vars, installs fs-cli)
   |
-setup (validates auth, exports env vars)
+  +---> scan (runs fs-cli scan, uploads results to platform)
   |
   +---> run-report (generates findings reports)
   |       |
