@@ -13,7 +13,10 @@ inputs:
     required: false
     default: 'app.finitestate.io'
   project-id:
-    description: 'Project ID (UUID) or exact project name. Names are resolved to IDs automatically.'
+    description: 'Project ID (UUID) for subsequent actions'
+    required: false
+  project-name:
+    description: 'Exact project name. Resolved to a project ID. Mutually exclusive with project-id.'
     required: false
   version-id:
     description: 'Default version ID for subsequent actions'
@@ -37,6 +40,7 @@ runs:
         INPUT_API-TOKEN: ${{ inputs.api-token }}
         INPUT_DOMAIN: ${{ inputs.domain }}
         INPUT_PROJECT-ID: ${{ inputs.project-id }}
+        INPUT_PROJECT-NAME: ${{ inputs.project-name }}
         INPUT_VERSION-ID: ${{ inputs.version-id }}
     - name: Install fs-cli
       shell: bash

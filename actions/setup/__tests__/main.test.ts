@@ -41,39 +41,33 @@ describe('setup action', () => {
         'api-token': 'test-token',
         domain: 'app.finitestate.io',
         'project-id': 'proj-123',
+        'project-name': '',
         'version-id': 'ver-456',
       }
       return inputs[name] ?? ''
     })
 
-    // Default: resolveProjectId returns the value as-is
-    mockResolveProjectId.mockImplementation((_client: unknown, value: string) =>
-      Promise.resolve(value),
-    )
-  })
-
-  it('validates auth and exports context', async () => {
     mockGetAuthUser.mockResolvedValue({
       id: 'user-1',
       email: 'testuser@example.com',
       organizationId: 'org-1',
     })
 
+    mockResolveProjectId.mockImplementation((_client: unknown, value: string) =>
+      Promise.resolve(value),
+    )
+  })
+
+  it('validates auth and exports context with project-id', async () => {
     await run()
 
-    // FsClient was constructed with correct config
     expect(FsClient).toHaveBeenCalledWith({
       apiToken: 'test-token',
       domain: 'app.finitestate.io',
     })
-
-    // getAuthUser was called
     expect(mockGetAuthUser).toHaveBeenCalled()
+    expect(mockResolveProjectId).not.toHaveBeenCalled()
 
-    // resolveProjectId was called with the input value
-    expect(mockResolveProjectId).toHaveBeenCalledWith(expect.anything(), 'proj-123')
-
-    // writeSetupContext was called
     expect(writeSetupContext).toHaveBeenCalledWith({
       apiToken: 'test-token',
       domain: 'app.finitestate.io',
@@ -81,28 +75,20 @@ describe('setup action', () => {
       versionId: 'ver-456',
     })
 
-    // outputs were set
     expect(core.setOutput).toHaveBeenCalledWith('user', 'testuser@example.com')
     expect(core.setOutput).toHaveBeenCalledWith('org-name', 'org-1')
     expect(core.setOutput).toHaveBeenCalledWith('project-id', 'proj-123')
     expect(core.setOutput).toHaveBeenCalledWith('version-id', 'ver-456')
-
-    // no failure
     expect(core.setFailed).not.toHaveBeenCalled()
   })
 
-  it('resolves project name to ID', async () => {
-    mockGetAuthUser.mockResolvedValue({
-      id: 'user-1',
-      email: 'testuser@example.com',
-      organizationId: 'org-1',
-    })
-
+  it('resolves project-name to ID', async () => {
     vi.mocked(core.getInput).mockImplementation((name: string) => {
       const inputs: Record<string, string> = {
         'api-token': 'test-token',
         domain: 'app.finitestate.io',
-        'project-id': 'WebGoat',
+        'project-id': '',
+        'project-name': 'WebGoat',
         'version-id': '',
       }
       return inputs[name] ?? ''
@@ -118,6 +104,25 @@ describe('setup action', () => {
     )
     expect(core.setOutput).toHaveBeenCalledWith('project-id', 'resolved-uuid-1234')
     expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('fails when both project-id and project-name are provided', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        'api-token': 'test-token',
+        domain: 'app.finitestate.io',
+        'project-id': 'proj-123',
+        'project-name': 'WebGoat',
+        'version-id': '',
+      }
+      return inputs[name] ?? ''
+    })
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(
+      expect.stringContaining('either project-id or project-name'),
+    )
   })
 
   it('fails with clear error on invalid auth (401)', async () => {

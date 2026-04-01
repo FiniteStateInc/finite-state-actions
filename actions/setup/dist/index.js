@@ -26545,20 +26545,25 @@ async function run() {
         // ── Read inputs ──────────────────────────────────────────────────────────
         const apiToken = core.getInput('api-token', { required: true });
         const domain = core.getInput('domain') || 'app.finitestate.io';
-        const projectInput = core.getInput('project-id') || undefined;
+        const projectIdInput = core.getInput('project-id') || undefined;
+        const projectNameInput = core.getInput('project-name') || undefined;
         const versionId = core.getInput('version-id') || undefined;
+        if (projectIdInput && projectNameInput) {
+            throw new Error('Provide either project-id or project-name, not both.');
+        }
         // ── Validate auth ────────────────────────────────────────────────────────
         const client = new core_1.FsClient({ apiToken, domain });
         const authUser = await client.getAuthUser();
         core.info(`Authenticated as: ${authUser.email}`);
         core.info(`Organization ID: ${authUser.organizationId}`);
-        // ── Resolve project ID (accepts UUID or project name) ───────────────────
+        // ── Resolve project ID ──────────────────────────────────────────────────
         let projectId;
-        if (projectInput) {
-            projectId = await (0, core_1.resolveProjectId)(client, projectInput);
-            if (projectId !== projectInput) {
-                core.info(`Resolved project name "${projectInput}" → ${projectId}`);
-            }
+        if (projectIdInput) {
+            projectId = projectIdInput;
+        }
+        else if (projectNameInput) {
+            projectId = await (0, core_1.resolveProjectId)(client, projectNameInput);
+            core.info(`Resolved project name "${projectNameInput}" → ${projectId}`);
         }
         // ── Export context for downstream actions ────────────────────────────────
         (0, core_1.writeSetupContext)({ apiToken, domain, projectId, versionId });
