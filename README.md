@@ -30,7 +30,7 @@ In your GitHub repository, go to Settings > Secrets and variables > Actions:
 | ------------------------- | -------- | ------------------------------------------------------------ |
 | `FINITE_STATE_AUTH_TOKEN` | Secret   | FS platform > Settings > API Tokens > Generate               |
 | `FINITE_STATE_DOMAIN`     | Variable | Your platform domain (e.g. `app.finitestate.io`)             |
-| `FS_PROJECT_ID`           | Variable | Project UUID or exact name (name resolved by `setup` action) |
+| `FINITE_STATE_PROJECT_ID`           | Variable | Project UUID or exact name (name resolved by `setup` action) |
 
 ### Usage
 
@@ -62,7 +62,7 @@ jobs:
         with:
           api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
           domain: ${{ vars.FINITE_STATE_DOMAIN }}
-          project-id: ${{ vars.FS_PROJECT_ID }}
+          project-id: ${{ vars.FINITE_STATE_PROJECT_ID }}
 
       - uses: FiniteStateInc/finite-state-actions/actions/scan@v1
         with:
@@ -101,7 +101,7 @@ jobs:
         with:
           api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
           domain: ${{ vars.FINITE_STATE_DOMAIN }}
-          project-id: ${{ vars.FS_PROJECT_ID }}
+          project-id: ${{ vars.FINITE_STATE_PROJECT_ID }}
 
       - uses: FiniteStateInc/finite-state-actions/actions/scan@v1
         with:
@@ -147,7 +147,7 @@ jobs:
         with:
           api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
           domain: ${{ vars.FINITE_STATE_DOMAIN }}
-          project-id: ${{ vars.FS_PROJECT_ID }}
+          project-id: ${{ vars.FINITE_STATE_PROJECT_ID }}
 
       - uses: FiniteStateInc/finite-state-actions/actions/scan@v1
         with:

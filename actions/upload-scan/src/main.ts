@@ -64,7 +64,7 @@ export async function run(): Promise<void> {
     // ── Set outputs & env var ────────────────────────────────────────────────
     core.setOutput('scan-id', scanId)
     core.setOutput('version-id', projectVersionId)
-    core.exportVariable('FS_VERSION_ID', projectVersionId)
+    core.exportVariable('FINITE_STATE_VERSION_ID', projectVersionId)
 
     core.info(`Scan uploaded: id=${scanId}, versionId=${projectVersionId}`)
 

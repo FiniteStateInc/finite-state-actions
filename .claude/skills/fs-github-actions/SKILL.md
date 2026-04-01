@@ -54,7 +54,7 @@ Establishes authentication and configuration context for all downstream actions 
   with:
     api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
     domain: ${{ vars.FINITE_STATE_DOMAIN }}
-    project-id: ${{ vars.FS_PROJECT_ID }}
+    project-id: ${{ vars.FINITE_STATE_PROJECT_ID }}
 ```
 
 ---
@@ -474,7 +474,7 @@ jobs:
         with:
           api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
           domain: ${{ vars.FINITE_STATE_DOMAIN }}
-          project-id: ${{ vars.FS_PROJECT_ID }}
+          project-id: ${{ vars.FINITE_STATE_PROJECT_ID }}
 
       - uses: finite-state/upload-scan@v1
         with:
@@ -533,7 +533,7 @@ jobs:
         with:
           api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
           domain: ${{ vars.FINITE_STATE_DOMAIN }}
-          project-id: ${{ vars.FS_PROJECT_ID }}
+          project-id: ${{ vars.FINITE_STATE_PROJECT_ID }}
 
       - uses: finite-state/run-report@v1
         with:
@@ -576,7 +576,7 @@ jobs:
         with:
           api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
           domain: ${{ vars.FINITE_STATE_DOMAIN }}
-          project-id: ${{ vars.FS_PROJECT_ID }}
+          project-id: ${{ vars.FINITE_STATE_PROJECT_ID }}
 
       - uses: finite-state/upload-scan@v1
         id: scan
@@ -625,7 +625,7 @@ jobs:
         with:
           api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
           domain: ${{ vars.FINITE_STATE_DOMAIN }}
-          project-id: ${{ vars.FS_PROJECT_ID }}
+          project-id: ${{ vars.FINITE_STATE_PROJECT_ID }}
 
       # 2. Upload and scan
       - uses: finite-state/upload-scan@v1
@@ -745,7 +745,7 @@ jobs:
 | ------------------------- | -------- | ------------------------------------------------------------------------------ |
 | `FINITE_STATE_AUTH_TOKEN` | Secret   | FS platform > Settings > API Tokens > Generate                                 |
 | `FINITE_STATE_DOMAIN`     | Variable | Your platform domain (e.g., `app.finitestate.io` or `customer.finitestate.io`) |
-| `FS_PROJECT_ID`           | Variable | FS platform > Projects > select project > copy ID from URL                     |
+| `FINITE_STATE_PROJECT_ID`           | Variable | FS platform > Projects > select project > copy ID from URL                     |
 
 Navigate to GitHub repo > Settings > Secrets and variables > Actions.
 

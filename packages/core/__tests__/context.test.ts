@@ -30,8 +30,8 @@ describe('writeSetupContext', () => {
       versionId: '67890',
     })
 
-    expect(core.exportVariable).toHaveBeenCalledWith('FS_PROJECT_ID', '12345')
-    expect(core.exportVariable).toHaveBeenCalledWith('FS_VERSION_ID', '67890')
+    expect(core.exportVariable).toHaveBeenCalledWith('FINITE_STATE_PROJECT_ID', '12345')
+    expect(core.exportVariable).toHaveBeenCalledWith('FINITE_STATE_VERSION_ID', '67890')
     expect(core.setOutput).toHaveBeenCalledWith('project-id', '12345')
     expect(core.setOutput).toHaveBeenCalledWith('version-id', '67890')
   })
@@ -51,7 +51,7 @@ describe('readSetupContext', () => {
   it('reads context from environment variables', () => {
     process.env.FINITE_STATE_AUTH_TOKEN = 'env-token'
     process.env.FINITE_STATE_DOMAIN = 'customer.finitestate.io'
-    process.env.FS_PROJECT_ID = '111'
+    process.env.FINITE_STATE_PROJECT_ID = '111'
 
     const ctx = readSetupContext()
 
@@ -64,7 +64,7 @@ describe('readSetupContext', () => {
   it('allows input overrides over env', () => {
     process.env.FINITE_STATE_AUTH_TOKEN = 'env-token'
     process.env.FINITE_STATE_DOMAIN = 'customer.finitestate.io'
-    process.env.FS_PROJECT_ID = '111'
+    process.env.FINITE_STATE_PROJECT_ID = '111'
 
     const ctx = readSetupContext({ projectId: '999' })
 

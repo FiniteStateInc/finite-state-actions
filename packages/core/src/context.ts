@@ -4,8 +4,8 @@ import type { SetupContext } from './models'
 const ENV_KEYS = {
   apiToken: 'FINITE_STATE_AUTH_TOKEN',
   domain: 'FINITE_STATE_DOMAIN',
-  projectId: 'FS_PROJECT_ID',
-  versionId: 'FS_VERSION_ID',
+  projectId: 'FINITE_STATE_PROJECT_ID',
+  versionId: 'FINITE_STATE_VERSION_ID',
 } as const
 
 export function writeSetupContext(ctx: SetupContext): void {

@@ -111,8 +111,8 @@ describe('upload-scan action', () => {
     expect(core.setOutput).toHaveBeenCalledWith('version-id', 'ver-999')
     expect(core.setOutput).toHaveBeenCalledWith('scan-status', 'COMPLETED')
 
-    // FS_VERSION_ID env var was exported
-    expect(core.exportVariable).toHaveBeenCalledWith('FS_VERSION_ID', 'ver-999')
+    // FINITE_STATE_VERSION_ID env var was exported
+    expect(core.exportVariable).toHaveBeenCalledWith('FINITE_STATE_VERSION_ID', 'ver-999')
 
     // no failure
     expect(core.setFailed).not.toHaveBeenCalled()

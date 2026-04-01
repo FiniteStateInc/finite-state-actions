@@ -38,7 +38,7 @@ Actions are bundled with `@vercel/ncc` into `dist/index.js` — these bundles ar
 `@finite-state/core` — imported by all actions via `workspace:*`.
 
 - **client.ts** — `FsClient` wraps Finite State REST API. Retry logic: exponential backoff, 6 retries for 429/5xx. Non-retryable: 400/401/403/404/500.
-- **context.ts** — Reads/writes `FINITE_STATE_AUTH_TOKEN`, `FINITE_STATE_DOMAIN`, `FS_PROJECT_ID`, `FS_VERSION_ID` environment variables via `@actions/core`. The `setup` action exports these; downstream actions read them.
+- **context.ts** — Reads/writes `FINITE_STATE_AUTH_TOKEN`, `FINITE_STATE_DOMAIN`, `FINITE_STATE_PROJECT_ID`, `FINITE_STATE_VERSION_ID` environment variables via `@actions/core`. The `setup` action exports these; downstream actions read them.
 - **models.ts** — Shared enums (`Severity`, `ScanType`, `GateMode`, `SbomFormat`, etc.) and interfaces (`Finding`, `GateResult`, `ReportSummary`, etc.).
 - **gates.ts** — `evaluateGates()` — three modes: `delta`, `threshold`, `triage-priority`.
 - **report-parser.ts** — Parses CSV output from `fs-report` tool (triage and version-delta formats).
