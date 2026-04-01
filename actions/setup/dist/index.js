@@ -25897,8 +25897,8 @@ const core = __importStar(__nccwpck_require__(4442));
 const ENV_KEYS = {
     apiToken: 'FINITE_STATE_AUTH_TOKEN',
     domain: 'FINITE_STATE_DOMAIN',
-    projectId: 'FS_PROJECT_ID',
-    versionId: 'FS_VERSION_ID',
+    projectId: 'FINITE_STATE_PROJECT_ID',
+    versionId: 'FINITE_STATE_VERSION_ID',
 };
 function writeSetupContext(ctx) {
     core.setSecret(ctx.apiToken);

@@ -25897,8 +25897,8 @@ const core = __importStar(__nccwpck_require__(4442));
 const ENV_KEYS = {
     apiToken: 'FINITE_STATE_AUTH_TOKEN',
     domain: 'FINITE_STATE_DOMAIN',
-    projectId: 'FS_PROJECT_ID',
-    versionId: 'FS_VERSION_ID',
+    projectId: 'FINITE_STATE_PROJECT_ID',
+    versionId: 'FINITE_STATE_VERSION_ID',
 };
 function writeSetupContext(ctx) {
     core.setSecret(ctx.apiToken);
@@ -26592,7 +26592,7 @@ async function run() {
         // ── Set outputs & env var ────────────────────────────────────────────────
         core.setOutput('scan-id', scanId);
         core.setOutput('version-id', projectVersionId);
-        core.exportVariable('FS_VERSION_ID', projectVersionId);
+        core.exportVariable('FINITE_STATE_VERSION_ID', projectVersionId);
         core.info(`Scan uploaded: id=${scanId}, versionId=${projectVersionId}`);
         // ── Poll or submit ───────────────────────────────────────────────────────
         if (waitForCompletion) {
