@@ -15,9 +15,9 @@ export async function run(): Promise<void> {
     // ── Read setup context with overrides ────────────────────────────────────
     const ctx = readSetupContext({ projectId: projectIdOverride })
 
-    if (!ctx.projectId) {
+    if (!ctx.projectId && !name) {
       throw new Error(
-        'project-id is required. Set it via the setup action or the project-id input.',
+        'Either project-id or name is required. Set project-id via the setup action or provide a name input.',
       )
     }
 
@@ -29,18 +29,14 @@ export async function run(): Promise<void> {
       ctx.apiToken,
       '--endpoint',
       `https://${ctx.domain}`,
-      '--project-id',
-      ctx.projectId,
       '--version',
       version,
     ]
 
-    if (name) {
-      args.push('--name', name)
+    if (ctx.projectId) {
+      args.push('--project-id', ctx.projectId)
     } else {
-      throw new Error(
-        'name is required. Set it via the name input or ensure GITHUB_REPOSITORY is available.',
-      )
+      args.push('--name', name!)
     }
 
     if (extraArgs) {
