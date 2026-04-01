@@ -26,11 +26,11 @@ A collection of GitHub Actions for integrating [Finite State](https://finitestat
 
 In your GitHub repository, go to Settings > Secrets and variables > Actions:
 
-| Name            | Type     | Where to find                                                |
-| --------------- | -------- | ------------------------------------------------------------ |
-| `FS_API_TOKEN`  | Secret   | FS platform > Settings > API Tokens > Generate               |
-| `FS_DOMAIN`     | Variable | Your platform domain (e.g. `app.finitestate.io`)             |
-| `FS_PROJECT_ID` | Variable | Project UUID or exact name (name resolved by `setup` action) |
+| Name                      | Type     | Where to find                                                |
+| ------------------------- | -------- | ------------------------------------------------------------ |
+| `FINITE_STATE_AUTH_TOKEN` | Secret   | FS platform > Settings > API Tokens > Generate               |
+| `FINITE_STATE_DOMAIN`     | Variable | Your platform domain (e.g. `app.finitestate.io`)             |
+| `FS_PROJECT_ID`           | Variable | Project UUID or exact name (name resolved by `setup` action) |
 
 ### Usage
 
@@ -60,8 +60,8 @@ jobs:
 
       - uses: FiniteStateInc/finite-state-actions/actions/setup@v1
         with:
-          api-token: ${{ secrets.FS_API_TOKEN }}
-          domain: ${{ vars.FS_DOMAIN }}
+          api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
+          domain: ${{ vars.FINITE_STATE_DOMAIN }}
           project-id: ${{ vars.FS_PROJECT_ID }}
 
       - uses: FiniteStateInc/finite-state-actions/actions/scan@v1
@@ -74,8 +74,7 @@ You can also reference a project by name instead of ID:
 ```yaml
 - uses: FiniteStateInc/finite-state-actions/actions/setup@v1
   with:
-    api-token: ${{ secrets.FS_API_TOKEN }}
-    domain: ${{ vars.FS_DOMAIN }}
+    api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
     project-name: MyProject
 ```
 
@@ -100,8 +99,8 @@ jobs:
 
       - uses: FiniteStateInc/finite-state-actions/actions/setup@v1
         with:
-          api-token: ${{ secrets.FS_API_TOKEN }}
-          domain: ${{ vars.FS_DOMAIN }}
+          api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
+          domain: ${{ vars.FINITE_STATE_DOMAIN }}
           project-id: ${{ vars.FS_PROJECT_ID }}
 
       - uses: FiniteStateInc/finite-state-actions/actions/scan@v1
@@ -146,8 +145,8 @@ jobs:
 
       - uses: FiniteStateInc/finite-state-actions/actions/setup@v1
         with:
-          api-token: ${{ secrets.FS_API_TOKEN }}
-          domain: ${{ vars.FS_DOMAIN }}
+          api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
+          domain: ${{ vars.FINITE_STATE_DOMAIN }}
           project-id: ${{ vars.FS_PROJECT_ID }}
 
       - uses: FiniteStateInc/finite-state-actions/actions/scan@v1
@@ -163,7 +162,7 @@ jobs:
 
 ## Action chaining
 
-Actions pass data via step outputs and environment variables. The `setup` action exports `FS_API_TOKEN` and `FS_DOMAIN` as environment variables for the entire job.
+Actions pass data via step outputs and environment variables. The `setup` action exports `FINITE_STATE_AUTH_TOKEN` and `FINITE_STATE_DOMAIN` as environment variables for the entire job.
 
 ```
 setup (validates auth, exports env vars, installs fs-cli)

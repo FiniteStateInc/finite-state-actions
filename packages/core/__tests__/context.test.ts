@@ -18,8 +18,8 @@ describe('writeSetupContext', () => {
     })
 
     expect(core.setSecret).toHaveBeenCalledWith('test-token')
-    expect(core.exportVariable).toHaveBeenCalledWith('FS_API_TOKEN', 'test-token')
-    expect(core.exportVariable).toHaveBeenCalledWith('FS_DOMAIN', 'app.finitestate.io')
+    expect(core.exportVariable).toHaveBeenCalledWith('FINITE_STATE_AUTH_TOKEN', 'test-token')
+    expect(core.exportVariable).toHaveBeenCalledWith('FINITE_STATE_DOMAIN', 'app.finitestate.io')
   })
 
   it('exports optional project-id and version-id', () => {
@@ -49,8 +49,8 @@ describe('readSetupContext', () => {
   })
 
   it('reads context from environment variables', () => {
-    process.env.FS_API_TOKEN = 'env-token'
-    process.env.FS_DOMAIN = 'customer.finitestate.io'
+    process.env.FINITE_STATE_AUTH_TOKEN = 'env-token'
+    process.env.FINITE_STATE_DOMAIN = 'customer.finitestate.io'
     process.env.FS_PROJECT_ID = '111'
 
     const ctx = readSetupContext()
@@ -62,8 +62,8 @@ describe('readSetupContext', () => {
   })
 
   it('allows input overrides over env', () => {
-    process.env.FS_API_TOKEN = 'env-token'
-    process.env.FS_DOMAIN = 'customer.finitestate.io'
+    process.env.FINITE_STATE_AUTH_TOKEN = 'env-token'
+    process.env.FINITE_STATE_DOMAIN = 'customer.finitestate.io'
     process.env.FS_PROJECT_ID = '111'
 
     const ctx = readSetupContext({ projectId: '999' })
@@ -73,6 +73,7 @@ describe('readSetupContext', () => {
   })
 
   it('throws if no API token available', () => {
-    expect(() => readSetupContext()).toThrow('FS_API_TOKEN')
+    delete process.env.FINITE_STATE_AUTH_TOKEN
+    expect(() => readSetupContext()).toThrow('FINITE_STATE_AUTH_TOKEN')
   })
 })

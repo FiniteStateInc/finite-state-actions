@@ -2,8 +2,8 @@ import * as core from '@actions/core'
 import type { SetupContext } from './models'
 
 const ENV_KEYS = {
-  apiToken: 'FS_API_TOKEN',
-  domain: 'FS_DOMAIN',
+  apiToken: 'FINITE_STATE_AUTH_TOKEN',
+  domain: 'FINITE_STATE_DOMAIN',
   projectId: 'FS_PROJECT_ID',
   versionId: 'FS_VERSION_ID',
 } as const

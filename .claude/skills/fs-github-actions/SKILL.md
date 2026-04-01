@@ -28,12 +28,12 @@ Establishes authentication and configuration context for all downstream actions 
 
 **Inputs:**
 
-| Input        | Required | Default              | Description                                    |
-| ------------ | -------- | -------------------- | ---------------------------------------------- |
-| `api-token`  | yes      | —                    | FS API token (store in `secrets.FS_API_TOKEN`) |
-| `domain`     | no       | `app.finitestate.io` | Platform domain                                |
-| `project-id` | no       | —                    | Default project ID for subsequent actions      |
-| `version-id` | no       | —                    | Default version ID for subsequent actions      |
+| Input        | Required | Default              | Description                                               |
+| ------------ | -------- | -------------------- | --------------------------------------------------------- |
+| `api-token`  | yes      | —                    | FS API token (store in `secrets.FINITE_STATE_AUTH_TOKEN`) |
+| `domain`     | no       | `app.finitestate.io` | Platform domain                                           |
+| `project-id` | no       | —                    | Default project ID for subsequent actions                 |
+| `version-id` | no       | —                    | Default version ID for subsequent actions                 |
 
 **Outputs:**
 
@@ -44,7 +44,7 @@ Establishes authentication and configuration context for all downstream actions 
 | `project-id` | Echoed or resolved project ID        |
 | `version-id` | Echoed or resolved version ID        |
 
-**Behavior:** Validates the token via `GET /public/v0/authUser`. Exports `FS_API_TOKEN` and `FS_DOMAIN` as environment variables so downstream actions inherit auth without re-specifying. Fails fast with a clear error if auth is invalid.
+**Behavior:** Validates the token via `GET /public/v0/authUser`. Exports `FINITE_STATE_AUTH_TOKEN` and `FINITE_STATE_DOMAIN` as environment variables so downstream actions inherit auth without re-specifying. Fails fast with a clear error if auth is invalid.
 
 **Example:**
 
@@ -52,8 +52,8 @@ Establishes authentication and configuration context for all downstream actions 
 - uses: finite-state/setup@v1
   id: fs
   with:
-    api-token: ${{ secrets.FS_API_TOKEN }}
-    domain: ${{ vars.FS_DOMAIN }}
+    api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
+    domain: ${{ vars.FINITE_STATE_DOMAIN }}
     project-id: ${{ vars.FS_PROJECT_ID }}
 ```
 
@@ -379,7 +379,7 @@ Actions pass data via GitHub Actions step outputs and environment variables. The
 
 ```
 setup
-  |-- exports: FS_API_TOKEN, FS_DOMAIN (env vars for entire job)
+  |-- exports: FINITE_STATE_AUTH_TOKEN, FINITE_STATE_DOMAIN (env vars for entire job)
   |-- outputs: project-id, version-id, org-name, user
   |
   v
@@ -419,7 +419,7 @@ Use `steps.<step-id>.outputs.<output-name>`:
 - uses: finite-state/setup@v1
   id: fs
   with:
-    api-token: ${{ secrets.FS_API_TOKEN }}
+    api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
 
 - uses: finite-state/upload-scan@v1
   id: scan
@@ -472,8 +472,8 @@ jobs:
 
       - uses: finite-state/setup@v1
         with:
-          api-token: ${{ secrets.FS_API_TOKEN }}
-          domain: ${{ vars.FS_DOMAIN }}
+          api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
+          domain: ${{ vars.FINITE_STATE_DOMAIN }}
           project-id: ${{ vars.FS_PROJECT_ID }}
 
       - uses: finite-state/upload-scan@v1
@@ -531,8 +531,8 @@ jobs:
     steps:
       - uses: finite-state/setup@v1
         with:
-          api-token: ${{ secrets.FS_API_TOKEN }}
-          domain: ${{ vars.FS_DOMAIN }}
+          api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
+          domain: ${{ vars.FINITE_STATE_DOMAIN }}
           project-id: ${{ vars.FS_PROJECT_ID }}
 
       - uses: finite-state/run-report@v1
@@ -574,8 +574,8 @@ jobs:
 
       - uses: finite-state/setup@v1
         with:
-          api-token: ${{ secrets.FS_API_TOKEN }}
-          domain: ${{ vars.FS_DOMAIN }}
+          api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
+          domain: ${{ vars.FINITE_STATE_DOMAIN }}
           project-id: ${{ vars.FS_PROJECT_ID }}
 
       - uses: finite-state/upload-scan@v1
@@ -623,8 +623,8 @@ jobs:
       # 1. Auth
       - uses: finite-state/setup@v1
         with:
-          api-token: ${{ secrets.FS_API_TOKEN }}
-          domain: ${{ vars.FS_DOMAIN }}
+          api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
+          domain: ${{ vars.FINITE_STATE_DOMAIN }}
           project-id: ${{ vars.FS_PROJECT_ID }}
 
       # 2. Upload and scan
@@ -686,12 +686,12 @@ jobs:
 
 ### Authentication failures
 
-| Symptom                                 | Cause                              | Fix                                                                                       |
-| --------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------- |
-| `setup` fails with "401 Unauthorized"   | Invalid or expired API token       | Regenerate token in FS platform (Settings > API Tokens) and update `secrets.FS_API_TOKEN` |
-| `setup` fails with "403 Forbidden"      | Token lacks required permissions   | Ensure token has read/write access to the target project                                  |
-| Downstream action fails with auth error | `setup` step was not run or failed | Add `finite-state/setup@v1` as the first step; check that it succeeded                    |
-| Auth works locally but fails in CI      | Token stored incorrectly           | Verify the secret is set at the correct scope (repo or org) and the workflow has access   |
+| Symptom                                 | Cause                              | Fix                                                                                                  |
+| --------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `setup` fails with "401 Unauthorized"   | Invalid or expired API token       | Regenerate token in FS platform (Settings > API Tokens) and update `secrets.FINITE_STATE_AUTH_TOKEN` |
+| `setup` fails with "403 Forbidden"      | Token lacks required permissions   | Ensure token has read/write access to the target project                                             |
+| Downstream action fails with auth error | `setup` step was not run or failed | Add `finite-state/setup@v1` as the first step; check that it succeeded                               |
+| Auth works locally but fails in CI      | Token stored incorrectly           | Verify the secret is set at the correct scope (repo or org) and the workflow has access              |
 
 ### Scan timeouts
 
@@ -741,11 +741,11 @@ jobs:
 
 **Step 1: Add secrets and variables to the GitHub repo**
 
-| Name            | Type     | Where to find                                                                  |
-| --------------- | -------- | ------------------------------------------------------------------------------ |
-| `FS_API_TOKEN`  | Secret   | FS platform > Settings > API Tokens > Generate                                 |
-| `FS_DOMAIN`     | Variable | Your platform domain (e.g., `app.finitestate.io` or `customer.finitestate.io`) |
-| `FS_PROJECT_ID` | Variable | FS platform > Projects > select project > copy ID from URL                     |
+| Name                      | Type     | Where to find                                                                  |
+| ------------------------- | -------- | ------------------------------------------------------------------------------ |
+| `FINITE_STATE_AUTH_TOKEN` | Secret   | FS platform > Settings > API Tokens > Generate                                 |
+| `FINITE_STATE_DOMAIN`     | Variable | Your platform domain (e.g., `app.finitestate.io` or `customer.finitestate.io`) |
+| `FS_PROJECT_ID`           | Variable | FS platform > Projects > select project > copy ID from URL                     |
 
 Navigate to GitHub repo > Settings > Secrets and variables > Actions.
 
@@ -791,7 +791,7 @@ Create `.github/fs-scoring.yaml` with custom scoring weights. Same format as fs-
 2. Navigate to Settings > API Tokens
 3. Click "Generate New Token"
 4. Copy the token immediately (it won't be shown again)
-5. Add it as a secret in GitHub: repo Settings > Secrets > Actions > New repository secret > Name: `FS_API_TOKEN`
+5. Add it as a secret in GitHub: repo Settings > Secrets > Actions > New repository secret > Name: `FINITE_STATE_AUTH_TOKEN`
 
 ---
 

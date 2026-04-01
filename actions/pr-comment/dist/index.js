@@ -30174,8 +30174,8 @@ exports.writeSetupContext = writeSetupContext;
 exports.readSetupContext = readSetupContext;
 const core = __importStar(__nccwpck_require__(4442));
 const ENV_KEYS = {
-    apiToken: 'FS_API_TOKEN',
-    domain: 'FS_DOMAIN',
+    apiToken: 'FINITE_STATE_AUTH_TOKEN',
+    domain: 'FINITE_STATE_DOMAIN',
     projectId: 'FS_PROJECT_ID',
     versionId: 'FS_VERSION_ID',
 };
