@@ -745,7 +745,7 @@ jobs:
 | ------------------------- | -------- | ------------------------------------------------------------------------------ |
 | `FINITE_STATE_AUTH_TOKEN` | Secret   | FS platform > Settings > API Tokens > Generate                                 |
 | `FINITE_STATE_DOMAIN`     | Variable | Your platform domain (e.g., `app.finitestate.io` or `customer.finitestate.io`) |
-| `FINITE_STATE_PROJECT_ID`           | Variable | FS platform > Projects > select project > copy ID from URL                     |
+| `FINITE_STATE_PROJECT_ID` | Variable | FS platform > Projects > select project > copy ID from URL                     |
 
 Navigate to GitHub repo > Settings > Secrets and variables > Actions.
 

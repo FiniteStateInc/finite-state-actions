@@ -30,7 +30,7 @@ In your GitHub repository, go to Settings > Secrets and variables > Actions:
 | ------------------------- | -------- | ------------------------------------------------------------ |
 | `FINITE_STATE_AUTH_TOKEN` | Secret   | FS platform > Settings > API Tokens > Generate               |
 | `FINITE_STATE_DOMAIN`     | Variable | Your platform domain (e.g. `app.finitestate.io`)             |
-| `FINITE_STATE_PROJECT_ID`           | Variable | Project UUID or exact name (name resolved by `setup` action) |
+| `FINITE_STATE_PROJECT_ID` | Variable | Project UUID or exact name (name resolved by `setup` action) |
 
 ### Usage
 
