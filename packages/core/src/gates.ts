@@ -41,7 +41,11 @@ function evaluateDelta(summary: ReportSummary, options: GateOptions): GateModeRe
 
   const { maxNewCritical, maxNewHigh, maxNewMedium } = options
 
-  if (maxNewCritical !== undefined && maxNewCritical !== -1 && newBySeverity.CRITICAL > maxNewCritical) {
+  if (
+    maxNewCritical !== undefined &&
+    maxNewCritical !== -1 &&
+    newBySeverity.CRITICAL > maxNewCritical
+  ) {
     failures.push(`${newBySeverity.CRITICAL} new critical findings exceed max ${maxNewCritical}`)
   }
   if (maxNewHigh !== undefined && maxNewHigh !== -1 && newBySeverity.HIGH > maxNewHigh) {
@@ -159,7 +163,11 @@ function evaluateTriage(summary: ReportSummary, options: GateOptions): GateModeR
  * Evaluate quality gates across one or more modes.
  * All modes are AND'd — all must pass for an overall pass result.
  */
-export function evaluateGates(modes: GateMode[], summary: ReportSummary, options: GateOptions): GateResult {
+export function evaluateGates(
+  modes: GateMode[],
+  summary: ReportSummary,
+  options: GateOptions,
+): GateResult {
   const details: GateModeResult[] = []
 
   for (const mode of modes) {

@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { parseTriageCsv, parseVersionComparisonCsv, parseFindingsSummaryJson } from '../src/report-parser'
+import {
+  parseTriageCsv,
+  parseVersionComparisonCsv,
+  parseFindingsSummaryJson,
+} from '../src/report-parser'
 
 const fixturesDir = join(__dirname, 'fixtures')
 

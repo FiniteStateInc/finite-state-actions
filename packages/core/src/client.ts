@@ -73,9 +73,7 @@ export class FsClient {
 
       // Exhausted retries or unknown status
       const body = await response.text().catch(() => '')
-      throw new Error(
-        `HTTP ${status} error after ${attempt} retries from ${url}: ${body}`,
-      )
+      throw new Error(`HTTP ${status} error after ${attempt} retries from ${url}: ${body}`)
     }
   }
 

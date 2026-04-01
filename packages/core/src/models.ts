@@ -2,30 +2,23 @@
 
 export type Severity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE'
 
-export type ScanType =
-  | 'sca'
-  | 'sast'
-  | 'config'
-  | 'vulnerability-analysis'
-  | 'sbom'
-  | 'third-party'
+export type ScanType = 'sca' | 'sast' | 'config' | 'vulnerability-analysis' | 'sbom' | 'third-party'
 
-export type ScanStatus =
-  | 'QUEUED'
-  | 'RUNNING'
-  | 'COMPLETED'
-  | 'FAILED'
-  | 'CANCELLED'
+export type ScanStatus = 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
 
-export type VexStatus =
-  | 'not_affected'
-  | 'affected'
-  | 'fixed'
-  | 'under_investigation'
+export type VexStatus = 'not_affected' | 'affected' | 'fixed' | 'under_investigation'
 
 export type PriorityBand = 'P0' | 'P1' | 'P2' | 'P3'
 
-export type GateMode = 'severity' | 'risk' | 'epss' | 'kev' | 'count' | 'delta' | 'threshold' | 'triage'
+export type GateMode =
+  | 'severity'
+  | 'risk'
+  | 'epss'
+  | 'kev'
+  | 'count'
+  | 'delta'
+  | 'threshold'
+  | 'triage'
 
 export type SbomFormat = 'cyclonedx' | 'spdx'
 

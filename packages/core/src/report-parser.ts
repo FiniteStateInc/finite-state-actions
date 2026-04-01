@@ -17,7 +17,10 @@ import type {
  * Handles standard comma-separated values with a header row.
  */
 export function parseCsvRows(csv: string): Record<string, string>[] {
-  const lines = csv.trim().split('\n').filter((l) => l.trim().length > 0)
+  const lines = csv
+    .trim()
+    .split('\n')
+    .filter((l) => l.trim().length > 0)
   if (lines.length < 2) return []
 
   const headers = lines[0].split(',').map((h) => h.trim())
@@ -66,7 +69,8 @@ export function parseTriageCsv(csv: string): TriageBands {
   for (const row of rows) {
     const band = row['Priority Band']?.trim() as 'P0' | 'P1' | 'P2' | 'P3' | undefined
     if (band && band in bands) {
-      (bands[band] as number)++
+      // eslint-disable-next-line no-extra-semi
+      ;(bands[band] as number)++
     }
 
     if (band === 'P0' || band === 'P1') {

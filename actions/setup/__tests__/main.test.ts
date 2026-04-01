@@ -127,8 +127,6 @@ describe('setup action', () => {
 
     await run()
 
-    expect(core.setFailed).toHaveBeenCalledWith(
-      expect.stringContaining('Unauthorized (401)'),
-    )
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('Unauthorized (401)'))
   })
 })

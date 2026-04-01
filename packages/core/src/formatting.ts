@@ -89,9 +89,7 @@ export function renderTriageComment(
     lines.push('')
 
     // Top Priority Findings (P0 and P1)
-    const priorityFindings = topFindings.filter(
-      (f): f is TriageFinding => f !== undefined,
-    )
+    const priorityFindings = topFindings.filter((f): f is TriageFinding => f !== undefined)
 
     if (priorityFindings.length > 0) {
       lines.push('### Top Priority Findings')

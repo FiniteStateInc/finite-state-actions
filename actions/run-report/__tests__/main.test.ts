@@ -209,9 +209,7 @@ describe('run-report action', () => {
 
     await run()
 
-    const fsReportCall = vi.mocked(exec.exec).mock.calls.find(
-      (call) => call[0] === 'fs-report',
-    )
+    const fsReportCall = vi.mocked(exec.exec).mock.calls.find((call) => call[0] === 'fs-report')
 
     expect(fsReportCall).toBeDefined()
     const args = fsReportCall![1] as string[]

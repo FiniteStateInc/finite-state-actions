@@ -212,9 +212,7 @@ describe('downloadSbom', () => {
     const result = await client.downloadSbom('pv1', 'cyclonedx', true)
 
     const [url, opts] = mockFetch.mock.calls[0]
-    expect(url).toBe(
-      'https://example.com/api/public/v0/sboms/cyclonedx/pv1?includeVex=true',
-    )
+    expect(url).toBe('https://example.com/api/public/v0/sboms/cyclonedx/pv1?includeVex=true')
     expect(opts.method).toBe('GET')
     expect(result).toEqual(sbomData)
   })
@@ -282,8 +280,18 @@ describe('retry logic', () => {
     const authUser: AuthUser = { id: 'u1', email: 'a@b.com', organizationId: 'o1' }
     const mockFetch = vi
       .fn()
-      .mockResolvedValueOnce({ ok: false, status: 429, json: async () => ({}), text: async () => '{}' })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => authUser, text: async () => JSON.stringify(authUser) })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        json: async () => ({}),
+        text: async () => '{}',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => authUser,
+        text: async () => JSON.stringify(authUser),
+      })
 
     vi.stubGlobal('fetch', mockFetch)
 
@@ -338,13 +346,35 @@ describe('pollScanCompletion', () => {
   it('resolves when scan reaches COMPLETED', async () => {
     vi.useFakeTimers()
 
-    const runningScan: Scan = { id: 's1', scanType: 'sca', status: 'RUNNING', createdAt: '2026-01-01', versionId: 'pv1' }
-    const completedScan: Scan = { id: 's1', scanType: 'sca', status: 'COMPLETED', createdAt: '2026-01-01', versionId: 'pv1' }
+    const runningScan: Scan = {
+      id: 's1',
+      scanType: 'sca',
+      status: 'RUNNING',
+      createdAt: '2026-01-01',
+      versionId: 'pv1',
+    }
+    const completedScan: Scan = {
+      id: 's1',
+      scanType: 'sca',
+      status: 'COMPLETED',
+      createdAt: '2026-01-01',
+      versionId: 'pv1',
+    }
 
     const mockFetch = vi
       .fn()
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => [runningScan], text: async () => '' })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => [completedScan], text: async () => '' })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [runningScan],
+        text: async () => '',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [completedScan],
+        text: async () => '',
+      })
 
     vi.stubGlobal('fetch', mockFetch)
 
@@ -362,10 +392,19 @@ describe('pollScanCompletion', () => {
   it('rejects when scan reaches FAILED', async () => {
     vi.useFakeTimers()
 
-    const failedScan: Scan = { id: 's1', scanType: 'sca', status: 'FAILED', createdAt: '2026-01-01', versionId: 'pv1' }
-    const mockFetch = vi
-      .fn()
-      .mockResolvedValue({ ok: true, status: 200, json: async () => [failedScan], text: async () => '' })
+    const failedScan: Scan = {
+      id: 's1',
+      scanType: 'sca',
+      status: 'FAILED',
+      createdAt: '2026-01-01',
+      versionId: 'pv1',
+    }
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => [failedScan],
+      text: async () => '',
+    })
 
     vi.stubGlobal('fetch', mockFetch)
 
@@ -387,10 +426,19 @@ describe('pollScanCompletion', () => {
   it('rejects when timeout is reached', async () => {
     vi.useFakeTimers()
 
-    const runningScan: Scan = { id: 's1', scanType: 'sca', status: 'RUNNING', createdAt: '2026-01-01', versionId: 'pv1' }
-    const mockFetch = vi
-      .fn()
-      .mockResolvedValue({ ok: true, status: 200, json: async () => [runningScan], text: async () => '' })
+    const runningScan: Scan = {
+      id: 's1',
+      scanType: 'sca',
+      status: 'RUNNING',
+      createdAt: '2026-01-01',
+      versionId: 'pv1',
+    }
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => [runningScan],
+      text: async () => '',
+    })
 
     vi.stubGlobal('fetch', mockFetch)
 
@@ -417,9 +465,7 @@ describe('listProjects', () => {
   afterEach(() => vi.restoreAllMocks())
 
   it('calls GET /projects with name filter', async () => {
-    const projects: Project[] = [
-      { id: 'p1', name: 'WebGoat', organizationId: 'org1' },
-    ]
+    const projects: Project[] = [{ id: 'p1', name: 'WebGoat', organizationId: 'org1' }]
     const mockFetch = makeFetch(projects)
     vi.stubGlobal('fetch', mockFetch)
 
@@ -433,9 +479,7 @@ describe('listProjects', () => {
   })
 
   it('handles wrapped { projects: [...] } response', async () => {
-    const projects: Project[] = [
-      { id: 'p1', name: 'MyProject', organizationId: 'org1' },
-    ]
+    const projects: Project[] = [{ id: 'p1', name: 'MyProject', organizationId: 'org1' }]
     const mockFetch = makeFetch({ projects })
     vi.stubGlobal('fetch', mockFetch)
 

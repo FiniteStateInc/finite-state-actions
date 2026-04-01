@@ -4,14 +4,14 @@ A collection of GitHub Actions for integrating [Finite State](https://finitestat
 
 ## Actions
 
-| Action | Description |
-|--------|-------------|
-| [setup](./actions/setup) | Authenticate with the Finite State platform and configure the environment |
-| [upload-scan](./actions/upload-scan) | Upload a firmware or software artifact for security scanning |
-| [run-report](./actions/run-report) | Generate security reports using fs-report |
-| [quality-gate](./actions/quality-gate) | Fail the build if findings exceed configurable thresholds |
-| [pr-comment](./actions/pr-comment) | Post a findings summary as a pull request comment |
-| [download-sbom](./actions/download-sbom) | Download the SBOM for a project version |
+| Action                                   | Description                                                               |
+| ---------------------------------------- | ------------------------------------------------------------------------- |
+| [setup](./actions/setup)                 | Authenticate with the Finite State platform and configure the environment |
+| [upload-scan](./actions/upload-scan)     | Upload a firmware or software artifact for security scanning              |
+| [run-report](./actions/run-report)       | Generate security reports using fs-report                                 |
+| [quality-gate](./actions/quality-gate)   | Fail the build if findings exceed configurable thresholds                 |
+| [pr-comment](./actions/pr-comment)       | Post a findings summary as a pull request comment                         |
+| [download-sbom](./actions/download-sbom) | Download the SBOM for a project version                                   |
 
 ## Quick Start
 
@@ -25,11 +25,11 @@ A collection of GitHub Actions for integrating [Finite State](https://finitestat
 
 In your GitHub repository, go to Settings > Secrets and variables > Actions:
 
-| Name | Type | Where to find |
-|------|------|---------------|
-| `FS_API_TOKEN` | Secret | FS platform > Settings > API Tokens > Generate |
-| `FS_DOMAIN` | Variable | Your platform domain (e.g. `app.finitestate.io`) |
-| `FS_PROJECT_ID` | Variable | From the project URL or API |
+| Name            | Type     | Where to find                                    |
+| --------------- | -------- | ------------------------------------------------ |
+| `FS_API_TOKEN`  | Secret   | FS platform > Settings > API Tokens > Generate   |
+| `FS_DOMAIN`     | Variable | Your platform domain (e.g. `app.finitestate.io`) |
+| `FS_PROJECT_ID` | Variable | From the project URL or API                      |
 
 ### Usage
 
@@ -110,7 +110,7 @@ jobs:
       - uses: FiniteStateInc/finite-state-actions/actions/run-report@v1
         id: report
         with:
-          recipe: "Triage Prioritization"
+          recipe: 'Triage Prioritization'
           period: 30d
 
       - uses: FiniteStateInc/finite-state-actions/actions/quality-gate@v1
@@ -165,7 +165,7 @@ jobs:
         with:
           format: cyclonedx
           include-vex: true
-          artifact-name: "sbom-${{ github.ref_name }}"
+          artifact-name: 'sbom-${{ github.ref_name }}'
 ```
 
 ## Action chaining

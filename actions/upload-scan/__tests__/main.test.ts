@@ -72,9 +72,20 @@ describe('upload-scan action', () => {
       return false
     })
 
-    mockCreateVersion.mockResolvedValue({ id: 'ver-999', name: 'v1.2.3', projectId: '42', createdAt: '' })
+    mockCreateVersion.mockResolvedValue({
+      id: 'ver-999',
+      name: 'v1.2.3',
+      projectId: '42',
+      createdAt: '',
+    })
     mockUploadScan.mockResolvedValue({ id: 'scan-123' })
-    mockPollScanCompletion.mockResolvedValue({ id: 'scan-123', status: 'COMPLETED', scanType: 'sca', createdAt: '', versionId: 'ver-999' })
+    mockPollScanCompletion.mockResolvedValue({
+      id: 'scan-123',
+      status: 'COMPLETED',
+      scanType: 'sca',
+      createdAt: '',
+      versionId: 'ver-999',
+    })
   })
 
   it('creates version and uploads SCA scan', async () => {

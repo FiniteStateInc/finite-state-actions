@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { renderSummaryComment, renderTriageComment, renderComparisonComment } from '../src/formatting'
+import {
+  renderSummaryComment,
+  renderTriageComment,
+  renderComparisonComment,
+} from '../src/formatting'
 import type { ReportSummary, GateResult } from '../src/models'
 
 const baseSummary: ReportSummary = {
@@ -120,10 +124,10 @@ describe('renderTriageComment', () => {
     expect(output).toContain('P1')
     expect(output).toContain('P2')
     expect(output).toContain('P3')
-    expect(output).toContain('1')   // P0 count
-    expect(output).toContain('3')   // P1 count
-    expect(output).toContain('15')  // P2 count
-    expect(output).toContain('29')  // P3 count
+    expect(output).toContain('1') // P0 count
+    expect(output).toContain('3') // P1 count
+    expect(output).toContain('15') // P2 count
+    expect(output).toContain('29') // P3 count
   })
 
   it('lists top P0/P1 findings with CVE ID and component', () => {

@@ -92,9 +92,7 @@ describe('quality-gate action', () => {
       expect.objectContaining({ maxNewCritical: 0 }),
     )
     expect(core.setOutput).toHaveBeenCalledWith('result', 'fail')
-    expect(core.setFailed).toHaveBeenCalledWith(
-      expect.stringContaining('Quality gate failed'),
-    )
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('Quality gate failed'))
   })
 
   it('passes when triage allows P0 count within threshold', async () => {
@@ -197,14 +195,8 @@ describe('quality-gate action', () => {
     await run()
 
     // Both modes should be passed, with triage-priority mapped to triage
-    expect(evaluateGates).toHaveBeenCalledWith(
-      ['delta', 'triage'],
-      baseSummary,
-      expect.any(Object),
-    )
+    expect(evaluateGates).toHaveBeenCalledWith(['delta', 'triage'], baseSummary, expect.any(Object))
     expect(core.setOutput).toHaveBeenCalledWith('result', 'fail')
-    expect(core.setFailed).toHaveBeenCalledWith(
-      expect.stringContaining('Quality gate failed'),
-    )
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('Quality gate failed'))
   })
 })

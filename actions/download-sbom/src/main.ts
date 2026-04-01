@@ -31,7 +31,9 @@ export async function run(): Promise<void> {
     const client = new FsClient({ apiToken: ctx.apiToken, domain: ctx.domain })
 
     core.info(`Downloading ${format} SBOM for version ${versionId} (includeVex=${includeVex})...`)
-    const sbom = await client.downloadSbom(versionId, format, includeVex) as { components?: unknown[] }
+    const sbom = (await client.downloadSbom(versionId, format, includeVex)) as {
+      components?: unknown[]
+    }
 
     // ── Write SBOM to file ───────────────────────────────────────────────────
     const outputDir = dirname(outputFile)

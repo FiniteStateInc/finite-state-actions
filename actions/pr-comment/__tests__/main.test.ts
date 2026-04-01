@@ -86,9 +86,7 @@ describe('pr-comment action', () => {
 
   it('creates a new comment when none exists', async () => {
     mockListComments.mockResolvedValue({
-      data: [
-        { id: 1, body: 'some other comment', html_url: 'https://github.com/comment/1' },
-      ],
+      data: [{ id: 1, body: 'some other comment', html_url: 'https://github.com/comment/1' }],
     })
 
     mockCreateComment.mockResolvedValue({

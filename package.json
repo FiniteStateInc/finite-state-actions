@@ -11,6 +11,7 @@
     "test": "pnpm -r run test",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "typecheck": "pnpm -r run typecheck"
   },
   "devDependencies": {

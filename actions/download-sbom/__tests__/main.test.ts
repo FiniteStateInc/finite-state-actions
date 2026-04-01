@@ -119,9 +119,7 @@ describe('download-sbom action', () => {
 
     await run()
 
-    expect(core.setFailed).toHaveBeenCalledWith(
-      expect.stringContaining('version-id'),
-    )
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('version-id'))
     expect(mockDownloadSbom).not.toHaveBeenCalled()
   })
 })

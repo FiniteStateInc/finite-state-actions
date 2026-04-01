@@ -66,7 +66,10 @@ export async function run(): Promise<void> {
     const args: string[] = ['run', '--headless', '--output', outputDir, '--cache-ttl', cacheTtl]
 
     // Split recipes by comma, add each as --recipe "Name"
-    const recipes = recipe.split(',').map((r) => r.trim()).filter(Boolean)
+    const recipes = recipe
+      .split(',')
+      .map((r) => r.trim())
+      .filter(Boolean)
     for (const r of recipes) {
       args.push('--recipe', r)
     }
