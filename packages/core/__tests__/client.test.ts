@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { FsClient } from '../src/client'
-import type { AuthUser, Version, Scan } from '../src/models'
+import { FsClient, isProjectId, resolveProjectId } from '../src/client'
+import type { AuthUser, Project, Version, Scan } from '../src/models'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -406,5 +406,120 @@ describe('pollScanCompletion', () => {
     expect(caughtError?.message).toMatch(/timeout/i)
 
     vi.useRealTimers()
+  })
+})
+
+// ── listProjects ─────────────────────────────────────────────────────────────
+
+describe('listProjects', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('calls GET /projects with name filter', async () => {
+    const projects: Project[] = [
+      { id: 'p1', name: 'WebGoat', organizationId: 'org1' },
+    ]
+    const mockFetch = makeFetch(projects)
+    vi.stubGlobal('fetch', mockFetch)
+
+    const client = new FsClient({ apiToken: 'tok', domain: 'example.com' })
+    const result = await client.listProjects('WebGoat')
+
+    const [url] = mockFetch.mock.calls[0]
+    expect(url).toContain('/projects?')
+    expect(url).toContain('filter=name%3D%3DWebGoat')
+    expect(result).toEqual(projects)
+  })
+
+  it('handles wrapped { projects: [...] } response', async () => {
+    const projects: Project[] = [
+      { id: 'p1', name: 'MyProject', organizationId: 'org1' },
+    ]
+    const mockFetch = makeFetch({ projects })
+    vi.stubGlobal('fetch', mockFetch)
+
+    const client = new FsClient({ apiToken: 'tok', domain: 'example.com' })
+    const result = await client.listProjects('MyProject')
+
+    expect(result).toEqual(projects)
+  })
+
+  it('calls GET /projects without filter when no name given', async () => {
+    const mockFetch = makeFetch([])
+    vi.stubGlobal('fetch', mockFetch)
+
+    const client = new FsClient({ apiToken: 'tok', domain: 'example.com' })
+    await client.listProjects()
+
+    const [url] = mockFetch.mock.calls[0]
+    expect(url).toBe('https://example.com/api/public/v0/projects')
+  })
+})
+
+// ── isProjectId ──────────────────────────────────────────────────────────────
+
+describe('isProjectId', () => {
+  it('returns true for valid UUIDs', () => {
+    expect(isProjectId('123e4567-e89b-12d3-a456-426614174000')).toBe(true)
+    expect(isProjectId('A1B2C3D4-E5F6-7890-ABCD-EF1234567890')).toBe(true)
+  })
+
+  it('returns false for project names', () => {
+    expect(isProjectId('WebGoat')).toBe(false)
+    expect(isProjectId('my-project')).toBe(false)
+    expect(isProjectId('')).toBe(false)
+  })
+})
+
+// ── resolveProjectId ─────────────────────────────────────────────────────────
+
+describe('resolveProjectId', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('returns UUID as-is without API call', async () => {
+    const mockFetch = makeFetch([])
+    vi.stubGlobal('fetch', mockFetch)
+
+    const client = new FsClient({ apiToken: 'tok', domain: 'example.com' })
+    const result = await resolveProjectId(client, '123e4567-e89b-12d3-a456-426614174000')
+
+    expect(result).toBe('123e4567-e89b-12d3-a456-426614174000')
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it('resolves project name to ID via API', async () => {
+    const projects: Project[] = [
+      { id: 'p1-uuid-here-0000-000000000000', name: 'WebGoat', organizationId: 'org1' },
+    ]
+    const mockFetch = makeFetch(projects)
+    vi.stubGlobal('fetch', mockFetch)
+
+    const client = new FsClient({ apiToken: 'tok', domain: 'example.com' })
+    const result = await resolveProjectId(client, 'WebGoat')
+
+    expect(result).toBe('p1-uuid-here-0000-000000000000')
+  })
+
+  it('throws when no project matches the name', async () => {
+    const mockFetch = makeFetch([])
+    vi.stubGlobal('fetch', mockFetch)
+
+    const client = new FsClient({ apiToken: 'tok', domain: 'example.com' })
+    await expect(resolveProjectId(client, 'NonExistent')).rejects.toThrow(
+      /No project found with name "NonExistent"/,
+    )
+  })
+
+  it('throws when multiple projects match the name', async () => {
+    const projects: Project[] = [
+      { id: 'p1', name: 'WebGoat', organizationId: 'org1' },
+      { id: 'p2', name: 'WebGoat', organizationId: 'org1' },
+    ]
+    const mockFetch = makeFetch(projects)
+    vi.stubGlobal('fetch', mockFetch)
+
+    const client = new FsClient({ apiToken: 'tok', domain: 'example.com' })
+    await expect(resolveProjectId(client, 'WebGoat')).rejects.toThrow(
+      /Multiple projects match name "WebGoat"/,
+    )
   })
 })

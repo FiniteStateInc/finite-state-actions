@@ -1,12 +1,12 @@
 import * as core from '@actions/core'
-import { FsClient, writeSetupContext } from '@finite-state/core'
+import { FsClient, resolveProjectId, writeSetupContext } from '@finite-state/core'
 
 export async function run(): Promise<void> {
   try {
     // ── Read inputs ──────────────────────────────────────────────────────────
     const apiToken = core.getInput('api-token', { required: true })
     const domain = core.getInput('domain') || 'app.finitestate.io'
-    const projectId = core.getInput('project-id') || undefined
+    const projectInput = core.getInput('project-id') || undefined
     const versionId = core.getInput('version-id') || undefined
 
     // ── Validate auth ────────────────────────────────────────────────────────
@@ -15,6 +15,15 @@ export async function run(): Promise<void> {
 
     core.info(`Authenticated as: ${authUser.email}`)
     core.info(`Organization ID: ${authUser.organizationId}`)
+
+    // ── Resolve project ID (accepts UUID or project name) ───────────────────
+    let projectId: string | undefined
+    if (projectInput) {
+      projectId = await resolveProjectId(client, projectInput)
+      if (projectId !== projectInput) {
+        core.info(`Resolved project name "${projectInput}" → ${projectId}`)
+      }
+    }
 
     // ── Export context for downstream actions ────────────────────────────────
     writeSetupContext({ apiToken, domain, projectId, versionId })
