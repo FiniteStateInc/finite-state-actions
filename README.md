@@ -19,17 +19,17 @@ A collection of GitHub Actions for integrating [Finite State](https://finitestat
 
 1. **Finite State account** with API access enabled
 2. **API token** generated from the FS platform (Settings > API Tokens)
-3. **Project ID** for the target project (visible in the platform URL: `app.finitestate.io/projects/<id>`)
+3. **Project ID or name** for the target project (ID visible in the platform URL: `app.finitestate.io/projects/<id>`, or use the exact project name — the `setup` action resolves names to IDs automatically)
 
 ### Add secrets and variables
 
 In your GitHub repository, go to Settings > Secrets and variables > Actions:
 
-| Name            | Type     | Where to find                                    |
-| --------------- | -------- | ------------------------------------------------ |
-| `FS_API_TOKEN`  | Secret   | FS platform > Settings > API Tokens > Generate   |
-| `FS_DOMAIN`     | Variable | Your platform domain (e.g. `app.finitestate.io`) |
-| `FS_PROJECT_ID` | Variable | From the project URL or API                      |
+| Name            | Type     | Where to find                                                |
+| --------------- | -------- | ------------------------------------------------------------ |
+| `FS_API_TOKEN`  | Secret   | FS platform > Settings > API Tokens > Generate               |
+| `FS_DOMAIN`     | Variable | Your platform domain (e.g. `app.finitestate.io`)             |
+| `FS_PROJECT_ID` | Variable | Project UUID or exact name (name resolved by `setup` action) |
 
 ### Usage
 
@@ -55,7 +55,7 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install fs-cli
         run: curl -fsSL https://raw.githubusercontent.com/FiniteStateInc/customer-resources/main/02-ci-cd-automation/fs-cli/install.sh | sh
@@ -87,7 +87,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install fs-cli
         run: curl -fsSL https://raw.githubusercontent.com/FiniteStateInc/customer-resources/main/02-ci-cd-automation/fs-cli/install.sh | sh
@@ -141,7 +141,7 @@ jobs:
   sbom:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install fs-cli
         run: curl -fsSL https://raw.githubusercontent.com/FiniteStateInc/customer-resources/main/02-ci-cd-automation/fs-cli/install.sh | sh
