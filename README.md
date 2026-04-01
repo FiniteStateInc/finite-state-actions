@@ -69,6 +69,15 @@ jobs:
           version: ${{ github.ref_name }}
 ```
 
+You can also reference a project by name instead of ID:
+
+```yaml
+- uses: FiniteStateInc/finite-state-actions/actions/setup@v1
+  with:
+    api-token: ${{ secrets.FS_API_TOKEN }}
+    project-name: MyProject
+```
+
 ### PR gate with reports
 
 Scan on every PR, generate a triage report, enforce a quality gate, and post results as a PR comment:
