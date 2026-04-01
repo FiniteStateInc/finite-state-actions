@@ -26551,8 +26551,8 @@ async function run() {
         const extraArgs = core.getInput('extra-args') || undefined;
         // ── Read setup context with overrides ────────────────────────────────────
         const ctx = (0, core_1.readSetupContext)({ projectId: projectIdOverride });
-        if (!ctx.projectId && !name) {
-            throw new Error('Either project-id or name is required. Set project-id via the setup action or provide a name input.');
+        if (!name) {
+            throw new Error('name is required. Set it via the name input or ensure GITHUB_REPOSITORY is available.');
         }
         // ── Build fs-cli args ────────────────────────────────────────────────────
         const args = [
@@ -26564,12 +26564,11 @@ async function run() {
             `https://${ctx.domain}`,
             '--version',
             version,
+            '--name',
+            name,
         ];
         if (ctx.projectId) {
             args.push('--project-id', ctx.projectId);
-        }
-        else {
-            args.push('--name', name);
         }
         if (extraArgs) {
             const extra = extraArgs.split(/\s+/).filter(Boolean);

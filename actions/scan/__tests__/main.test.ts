@@ -56,7 +56,7 @@ describe('scan action', () => {
     mockExec.mockResolvedValue(0)
   })
 
-  it('passes --project-id and omits --name when project-id is set', async () => {
+  it('always passes --name and includes --project-id when available', async () => {
     await run()
 
     expect(mockExec).toHaveBeenCalledWith(
@@ -70,6 +70,8 @@ describe('scan action', () => {
         'https://app.finitestate.io',
         '--version',
         'v1.0.0',
+        '--name',
+        'my-project',
         '--project-id',
         'proj-123',
       ],
@@ -89,7 +91,7 @@ describe('scan action', () => {
     expect(core.setFailed).toHaveBeenCalledWith('fs-cli scan exited with code 1')
   })
 
-  it('passes --name instead of --project-id when no project-id is set', async () => {
+  it('omits --project-id when no project-id is set', async () => {
     vi.mocked(core.getInput).mockImplementation((inputName: string) => {
       const inputs: Record<string, string> = {
         dir: '.',
@@ -124,7 +126,7 @@ describe('scan action', () => {
     delete process.env.GITHUB_REPOSITORY
   })
 
-  it('fails when neither project-id nor name is available', async () => {
+  it('fails when name is not available', async () => {
     vi.mocked(core.getInput).mockImplementation((inputName: string) => {
       const inputs: Record<string, string> = {
         dir: '.',
@@ -136,20 +138,11 @@ describe('scan action', () => {
       return inputs[inputName] ?? ''
     })
 
-    vi.mocked(readSetupContext).mockReturnValue({
-      apiToken: 'test-token',
-      domain: 'app.finitestate.io',
-      projectId: undefined,
-      versionId: undefined,
-    })
-
     delete process.env.GITHUB_REPOSITORY
 
     await run()
 
     expect(mockExec).not.toHaveBeenCalled()
-    expect(core.setFailed).toHaveBeenCalledWith(
-      expect.stringContaining('Either project-id or name is required'),
-    )
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('name is required'))
   })
 })
