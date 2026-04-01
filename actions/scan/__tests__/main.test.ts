@@ -117,11 +117,9 @@ describe('scan action', () => {
       expect.arrayContaining(['--name', 'my-firmware']),
       { ignoreReturnCode: true },
     )
-    expect(mockExec).toHaveBeenCalledWith(
-      'fs-cli',
-      expect.not.arrayContaining(['--project-id']),
-      { ignoreReturnCode: true },
-    )
+    expect(mockExec).toHaveBeenCalledWith('fs-cli', expect.not.arrayContaining(['--project-id']), {
+      ignoreReturnCode: true,
+    })
 
     delete process.env.GITHUB_REPOSITORY
   })
