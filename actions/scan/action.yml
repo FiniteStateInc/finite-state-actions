@@ -16,7 +16,7 @@ inputs:
     description: 'Version label for the scan (e.g. v1.2.3 or pr-42)'
     required: true
   name:
-    description: 'Project name sent to the platform. Defaults to repository name.'
+    description: 'Project name sent to the platform. Defaults to the repository name from GITHUB_REPOSITORY.'
     required: false
   extra-args:
     description: 'Additional arguments passed to fs-cli scan'

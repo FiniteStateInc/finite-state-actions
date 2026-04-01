@@ -91,6 +91,31 @@ describe('scan action', () => {
     expect(core.setFailed).toHaveBeenCalledWith('fs-cli scan exited with code 1')
   })
 
+  it('defaults name to repo name from GITHUB_REPOSITORY', async () => {
+    vi.mocked(core.getInput).mockImplementation((inputName: string) => {
+      const inputs: Record<string, string> = {
+        dir: '.',
+        'project-id': '',
+        version: 'v1.0.0',
+        name: '',
+        'extra-args': '',
+      }
+      return inputs[inputName] ?? ''
+    })
+
+    process.env.GITHUB_REPOSITORY = 'FiniteStateInc/my-firmware'
+
+    await run()
+
+    expect(mockExec).toHaveBeenCalledWith(
+      'fs-cli',
+      expect.arrayContaining(['--name', 'my-firmware']),
+      { ignoreReturnCode: true },
+    )
+
+    delete process.env.GITHUB_REPOSITORY
+  })
+
   it('fails when project-id is missing', async () => {
     vi.mocked(readSetupContext).mockReturnValue({
       apiToken: 'test-token',

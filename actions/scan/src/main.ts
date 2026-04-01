@@ -8,7 +8,8 @@ export async function run(): Promise<void> {
     const dir = core.getInput('dir') || '.'
     const projectIdOverride = core.getInput('project-id') || undefined
     const version = core.getInput('version', { required: true })
-    const name = core.getInput('name') || undefined
+    const name =
+      core.getInput('name') || process.env.GITHUB_REPOSITORY?.split('/').pop() || undefined
     const extraArgs = core.getInput('extra-args') || undefined
 
     // ── Read setup context with overrides ────────────────────────────────────
@@ -36,6 +37,10 @@ export async function run(): Promise<void> {
 
     if (name) {
       args.push('--name', name)
+    } else {
+      throw new Error(
+        'name is required. Set it via the name input or ensure GITHUB_REPOSITORY is available.',
+      )
     }
 
     if (extraArgs) {
