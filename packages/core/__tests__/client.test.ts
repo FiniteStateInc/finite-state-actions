@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { FsClient, isProjectId, resolveProjectId } from '../src/client'
 import type { AuthUser, Project, Version, Scan } from '../src/models'
 
@@ -18,11 +18,13 @@ function makeFetch(body: unknown, status = 200) {
 describe('FsClient constructor', () => {
   it('builds correct base URL from domain', () => {
     const client = new FsClient({ apiToken: 'tok', domain: 'platform.example.com' })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((client as any).baseUrl).toBe('https://platform.example.com/api/public/v0')
   })
 
   it('stores X-Authorization header', () => {
     const client = new FsClient({ apiToken: 'mytoken', domain: 'example.com' })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((client as any).headers['X-Authorization']).toBe('mytoken')
   })
 })

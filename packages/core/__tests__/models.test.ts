@@ -1,13 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  Severity,
-  ScanType,
-  ScanStatus,
-  PriorityBand,
-  severityOrder,
-  parseSeverityList,
-  riskToCvss,
-} from '../src/models'
+import { severityOrder, parseSeverityList, riskToCvss } from '../src/models'
 
 describe('severityOrder', () => {
   it('ranks CRITICAL highest', () => {

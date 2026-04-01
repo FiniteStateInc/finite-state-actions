@@ -43,6 +43,7 @@ export class FsClient {
   private async request<T>(url: string, opts: RequestInit): Promise<T> {
     let attempt = 0
 
+    // eslint-disable-next-line no-constant-condition
     while (true) {
       const response = await fetch(url, opts)
 
@@ -204,6 +205,7 @@ export class FsClient {
   ): Promise<Scan> {
     const deadline = Date.now() + timeoutMs
 
+    // eslint-disable-next-line no-constant-condition
     while (true) {
       const scan = await this.getScanStatus(projectVersionId)
 

@@ -21,7 +21,7 @@ vi.mock('@finite-state/core', () => ({
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
 
 import * as core from '@actions/core'
-import { evaluateGates, parseReportDirectory } from '@finite-state/core'
+import { evaluateGates } from '@finite-state/core'
 import { run } from '../src/main'
 
 // ── Shared test fixtures ───────────────────────────────────────────────────────

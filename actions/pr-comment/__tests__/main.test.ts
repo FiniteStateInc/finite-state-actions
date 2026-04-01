@@ -53,7 +53,6 @@ vi.mock('@finite-state/core', () => ({
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
 
 import * as core from '@actions/core'
-import * as github from '@actions/github'
 import { run } from '../src/main'
 
 // ── Shared test fixtures ───────────────────────────────────────────────────────
