@@ -29929,6 +29929,8 @@ function wrappy (fn, cb) {
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.FsClient = void 0;
+exports.isProjectId = isProjectId;
+exports.resolveProjectId = resolveProjectId;
 // ── Constants ─────────────────────────────────────────────────────────────────
 const MAX_RETRIES = 6;
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
@@ -29947,6 +29949,7 @@ class FsClient {
     // ── Internal request helpers ───────────────────────────────────────────────
     async request(url, opts) {
         let attempt = 0;
+        // eslint-disable-next-line no-constant-condition
         while (true) {
             const response = await fetch(url, opts);
             if (response.ok) {
@@ -29998,6 +30001,19 @@ class FsClient {
      */
     getAuthUser() {
         return this.get('/authUser');
+    }
+    /**
+     * GET /projects — list projects, optionally filtering by name.
+     */
+    async listProjects(name) {
+        const params = new URLSearchParams();
+        if (name) {
+            params.set('filter', `name==${name}`);
+        }
+        const query = params.toString();
+        const path = query ? `/projects?${query}` : '/projects';
+        const raw = await this.get(path);
+        return Array.isArray(raw) ? raw : raw.projects;
     }
     /**
      * POST /projects/{projectId}/versions — creates a new version.
@@ -30064,6 +30080,7 @@ class FsClient {
      */
     async pollScanCompletion(projectVersionId, timeoutMs, intervalMs) {
         const deadline = Date.now() + timeoutMs;
+        // eslint-disable-next-line no-constant-condition
         while (true) {
             const scan = await this.getScanStatus(projectVersionId);
             if (scan.status === 'COMPLETED') {
@@ -30081,6 +30098,32 @@ class FsClient {
 }
 exports.FsClient = FsClient;
 // ── Helpers ───────────────────────────────────────────────────────────────────
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * Returns true when the value looks like a UUID (the expected project ID format).
+ */
+function isProjectId(value) {
+    return UUID_RE.test(value);
+}
+/**
+ * If `value` is already a UUID, returns it as-is. Otherwise treats it as a
+ * project name, queries the API, and returns the matching project ID.
+ * Throws when the name matches zero or more than one project.
+ */
+async function resolveProjectId(client, value) {
+    if (isProjectId(value)) {
+        return value;
+    }
+    const projects = await client.listProjects(value);
+    if (projects.length === 0) {
+        throw new Error(`No project found with name "${value}". Pass a valid project ID (UUID) or an exact project name.`);
+    }
+    if (projects.length > 1) {
+        const names = projects.map((p) => `${p.name} (${p.id})`).join(', ');
+        throw new Error(`Multiple projects match name "${value}": ${names}. Pass the project ID (UUID) to be unambiguous.`);
+    }
+    return projects[0].id;
+}
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -30354,7 +30397,9 @@ function evaluateDelta(summary, options) {
         newMedium: newBySeverity.MEDIUM,
     };
     const { maxNewCritical, maxNewHigh, maxNewMedium } = options;
-    if (maxNewCritical !== undefined && maxNewCritical !== -1 && newBySeverity.CRITICAL > maxNewCritical) {
+    if (maxNewCritical !== undefined &&
+        maxNewCritical !== -1 &&
+        newBySeverity.CRITICAL > maxNewCritical) {
         failures.push(`${newBySeverity.CRITICAL} new critical findings exceed max ${maxNewCritical}`);
     }
     if (maxNewHigh !== undefined && maxNewHigh !== -1 && newBySeverity.HIGH > maxNewHigh) {
@@ -30587,7 +30632,10 @@ const path_1 = __nccwpck_require__(6928);
  * Handles standard comma-separated values with a header row.
  */
 function parseCsvRows(csv) {
-    const lines = csv.trim().split('\n').filter((l) => l.trim().length > 0);
+    const lines = csv
+        .trim()
+        .split('\n')
+        .filter((l) => l.trim().length > 0);
     if (lines.length < 2)
         return [];
     const headers = lines[0].split(',').map((h) => h.trim());
@@ -30628,6 +30676,8 @@ function parseTriageCsv(csv) {
     for (const row of rows) {
         const band = row['Priority Band']?.trim();
         if (band && band in bands) {
+            // eslint-disable-next-line no-extra-semi
+            ;
             bands[band]++;
         }
         if (band === 'P0' || band === 'P1') {
