@@ -27,7 +27,7 @@ vi.mock('@finite-state/core', () => ({
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
 
 import * as core from '@actions/core'
-import { FsClient, writeSetupContext, resolveProjectId } from '@finite-state/core'
+import { FsClient, writeSetupContext } from '@finite-state/core'
 import { run } from '../src/main'
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
