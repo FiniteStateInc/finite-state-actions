@@ -46,11 +46,12 @@ Actions are bundled with `@vercel/ncc` into `dist/index.js` — these bundles ar
 
 ### Actions (`actions/*`)
 
-Six GitHub Actions, each with `action.yml` + `src/main.ts` + `dist/index.js`:
+Seven GitHub Actions, each with `action.yml` + `src/main.ts` + `dist/index.js`:
 
 | Action          | Purpose                                                                      |
 | --------------- | ---------------------------------------------------------------------------- |
-| `setup`         | Auth bootstrap — validates token, exports env vars for downstream steps      |
+| `setup`         | Auth bootstrap — validates token, exports env vars, installs fs-cli          |
+| `scan`          | Run fs-cli dependency scan and upload results to the platform                |
 | `upload-scan`   | Upload firmware/SBOM files, optionally poll for scan completion              |
 | `run-report`    | Install & execute `fs-report` CLI (via pipx), parse output, upload artifacts |
 | `quality-gate`  | Evaluate findings against gate config, output pass/fail                      |

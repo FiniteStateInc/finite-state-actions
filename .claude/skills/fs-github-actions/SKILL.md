@@ -59,6 +59,40 @@ Establishes authentication and configuration context for all downstream actions 
 
 ---
 
+### scan
+
+Runs `fs-cli scan` to analyze project dependencies and upload results to the Finite State platform. Requires `setup` to run first (for auth context and fs-cli installation).
+
+**Usage:** `finite-state/scan@v1`
+
+**Inputs:**
+
+| Input        | Required | Default    | Description                                                                      |
+| ------------ | -------- | ---------- | -------------------------------------------------------------------------------- |
+| `dir`        | no       | `.`        | Directory to scan                                                                |
+| `project-id` | no       | from setup | Project ID (UUID). Overrides value from setup.                                   |
+| `version`    | yes      | —          | Version label for the scan (e.g. `v1.2.3` or `pr-42`)                           |
+| `name`       | no       | repo name  | Project name sent to the platform. Defaults to repository name.                  |
+| `extra-args` | no       | —          | Additional arguments passed to `fs-cli scan`                                     |
+
+**Outputs:**
+
+| Output      | Description              |
+| ----------- | ------------------------ |
+| `exit-code` | Exit code from fs-cli    |
+
+**Behavior:** Reads auth context from the `setup` action's exported environment variables. Always passes `--name` to `fs-cli` (required); adds `--project-id` when available. The `name` input defaults to the repository name extracted from `GITHUB_REPOSITORY`.
+
+**Example:**
+
+```yaml
+- uses: finite-state/scan@v1
+  with:
+    version: ${{ github.ref_name }}
+```
+
+---
+
 ### upload-scan
 
 Uploads a binary, SBOM, or third-party scan results for analysis. Handles all upload types through a single action with a `type` input.
@@ -378,13 +412,15 @@ Actions pass data via GitHub Actions step outputs and environment variables. The
 ### Data flow diagram
 
 ```
-setup
+setup (validates auth, exports env vars, installs fs-cli)
   |-- exports: FINITE_STATE_AUTH_TOKEN, FINITE_STATE_DOMAIN (env vars for entire job)
   |-- outputs: project-id, version-id, org-name, user
   |
-  v
-upload-scan (reads env + setup outputs)
-  |-- outputs: scan-id, version-id, scan-status
+  +---> scan (runs fs-cli dependency scan, uploads results)
+  |       |-- outputs: exit-code
+  |
+  +---> upload-scan (uploads binary/SBOM/third-party results)
+  |       |-- outputs: scan-id, version-id, scan-status
   |
   v
 run-report (reads env + setup/upload-scan outputs)
