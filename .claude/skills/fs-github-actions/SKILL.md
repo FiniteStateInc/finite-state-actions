@@ -67,19 +67,19 @@ Runs `fs-cli scan` to analyze project dependencies and upload results to the Fin
 
 **Inputs:**
 
-| Input        | Required | Default    | Description                                                                      |
-| ------------ | -------- | ---------- | -------------------------------------------------------------------------------- |
-| `dir`        | no       | `.`        | Directory to scan                                                                |
-| `project-id` | no       | from setup | Project ID (UUID). Overrides value from setup.                                   |
-| `version`    | yes      | —          | Version label for the scan (e.g. `v1.2.3` or `pr-42`)                           |
-| `name`       | no       | repo name  | Project name sent to the platform. Defaults to repository name.                  |
-| `extra-args` | no       | —          | Additional arguments passed to `fs-cli scan`                                     |
+| Input        | Required | Default    | Description                                                     |
+| ------------ | -------- | ---------- | --------------------------------------------------------------- |
+| `dir`        | no       | `.`        | Directory to scan                                               |
+| `project-id` | no       | from setup | Project ID (UUID). Overrides value from setup.                  |
+| `version`    | yes      | —          | Version label for the scan (e.g. `v1.2.3` or `pr-42`)           |
+| `name`       | no       | repo name  | Project name sent to the platform. Defaults to repository name. |
+| `extra-args` | no       | —          | Additional arguments passed to `fs-cli scan`                    |
 
 **Outputs:**
 
-| Output      | Description              |
-| ----------- | ------------------------ |
-| `exit-code` | Exit code from fs-cli    |
+| Output      | Description           |
+| ----------- | --------------------- |
+| `exit-code` | Exit code from fs-cli |
 
 **Behavior:** Reads auth context from the `setup` action's exported environment variables. Always passes `--name` to `fs-cli` (required); adds `--project-id` when available. The `name` input defaults to the repository name extracted from `GITHUB_REPOSITORY`.
 
