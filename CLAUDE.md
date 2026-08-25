@@ -13,9 +13,17 @@ pnpm install          # Install all dependencies
 pnpm build            # TypeScript compile all packages + ncc-bundle actions
 pnpm test             # Run all tests (Vitest)
 pnpm lint             # ESLint check
-pnpm format           # Prettier format
+pnpm format           # Prettier format (format:check in CI)
 pnpm typecheck        # TypeScript noEmit check
 ```
+
+**Build `packages/core` first in a fresh clone.** Actions import `@finite-state/core`, whose `main` points at `packages/core/dist` — which is gitignored. Until it exists, action `typecheck` and any non-mocked import fail:
+
+```bash
+pnpm -C packages/core run build
+```
+
+CI runs this explicitly before `typecheck` and `test`.
 
 Run a single test file:
 
@@ -29,28 +37,26 @@ Build a single action (from its directory):
 cd actions/setup && pnpm build
 ```
 
-Actions are bundled with `@vercel/ncc` into `dist/index.js` — these bundles are committed and must be up-to-date before merge (CI verifies this).
-
 ## Architecture
 
 ### Shared Core (`packages/core`)
 
-`@finite-state/core` — imported by all actions via `workspace:*`.
+`@finite-state/core` — imported by all actions via `workspace:*`. Everything is re-exported from `src/index.ts`.
 
-- **client.ts** — `FsClient` wraps Finite State REST API. Retry logic: exponential backoff, 6 retries for 429/5xx. Non-retryable: 400/401/403/404/500.
-- **context.ts** — Reads/writes `FINITE_STATE_AUTH_TOKEN`, `FINITE_STATE_DOMAIN`, `FINITE_STATE_PROJECT_ID`, `FINITE_STATE_VERSION_ID` environment variables via `@actions/core`. The `setup` action exports these; downstream actions read them.
+- **client.ts** — `FsClient` wraps Finite State REST API. Retry logic: exponential backoff (`2^attempt * 500ms`), 6 retries for 429/502/503/504. Non-retryable: 400/401/403/404/500.
+- **context.ts** — Reads/writes `FINITE_STATE_AUTH_TOKEN`, `FINITE_STATE_DOMAIN`, `FINITE_STATE_PROJECT_ID`, `FINITE_STATE_VERSION_ID` environment variables via `@actions/core`. The `setup` action calls `writeSetupContext()`; downstream actions call `readSetupContext()`.
 - **models.ts** — Shared enums (`Severity`, `ScanType`, `GateMode`, `SbomFormat`, etc.) and interfaces (`Finding`, `GateResult`, `ReportSummary`, etc.).
 - **gates.ts** — `evaluateGates()` — three modes: `delta`, `threshold`, `triage-priority`.
 - **report-parser.ts** — Parses CSV output from `fs-report` tool (triage and version-delta formats).
-- **formatting.ts** — Renders markdown for PR comments; supports edit-in-place via comment tags.
+- **formatting.ts** — Renders markdown for PR comments; edit-in-place works by embedding an HTML comment tag the action greps for on re-run.
 
 ### Actions (`actions/*`)
 
-Seven GitHub Actions, each with `action.yml` + `src/main.ts` + `dist/index.js`:
+Seven GitHub Actions, each with `action.yml` + `src/main.ts` + `tsconfig.json` + `__tests__/` + committed `dist/`:
 
 | Action          | Purpose                                                                      |
 | --------------- | ---------------------------------------------------------------------------- |
-| `setup`         | Auth bootstrap — validates token, exports env vars, installs fs-cli          |
+| `setup`         | Auth bootstrap — validates token, resolves project name to ID, exports env   |
 | `scan`          | Run fs-cli dependency scan and upload results to the platform                |
 | `upload-scan`   | Upload firmware/SBOM files, optionally poll for scan completion              |
 | `run-report`    | Install & execute `fs-report` CLI (via pipx), parse output, upload artifacts |
@@ -58,11 +64,26 @@ Seven GitHub Actions, each with `action.yml` + `src/main.ts` + `dist/index.js`:
 | `pr-comment`    | Post/update PR comment with findings summary and gate results                |
 | `download-sbom` | Export CycloneDX/SPDX SBOM, upload as artifact                               |
 
-Actions chain via environment variables (set by `setup`) and step outputs (JSON).
+Actions chain via environment variables (set by `setup`) and step outputs (JSON, e.g. `details-json`).
+
+### External CLIs
+
+Two actions shell out via `@actions/exec` rather than the REST API: `scan` runs `fs-cli` (installed by `setup`), `run-report` installs and runs `fs-report` through `pipx`. Tests mock `@actions/exec`, `@actions/core`, and `@finite-state/core` with `vi.mock` — no network or subprocess in tests.
+
+### Build & Release
+
+- Actions are bundled with `@vercel/ncc` into `dist/index.js`. **These bundles are committed** and CI fails the `build` job if `git diff actions/*/dist/` is non-empty — always run `pnpm build` and commit the bundle with any source change.
+- Root `.gitignore` lists `dist/` and `*.js`. Existing action bundles are already tracked so the rule doesn't affect them, but a **new** action's `dist/` needs `git add -f`.
+- Tagging `v*` runs CI, creates a GitHub Release, and force-moves the major tag (`v1`). Consumers pin `FiniteStateInc/finite-state-actions/actions/<name>@v1`, so a broken committed bundle ships immediately.
+
+### Adding or changing an action
+
+Inputs and outputs are documented in three places that CI does not keep in sync — update all of them: the action's `action.yml`, `README.md`, and `.claude/skills/fs-github-actions/SKILL.md` (the skill is the customer-facing action catalog).
 
 ## Code Style
 
 - TypeScript strict mode, target ES2022, CommonJS output
 - Prettier: no semicolons, single quotes, trailing commas, 100 char width
 - Unused variables prefixed with `_` are allowed
-- Node.js >= 20
+- Node.js >= 20 (CI runs 22)
+- Action `tsconfig.json` files only `include` `src/**/*`, so `pnpm typecheck` does not cover test files
