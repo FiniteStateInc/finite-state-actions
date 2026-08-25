@@ -83,6 +83,15 @@ Runs `fs-cli scan` to analyze project dependencies and upload results to the Fin
 
 **Behavior:** Reads auth context from the `setup` action's exported environment variables. Always passes `--name` to `fs-cli` (required); adds `--project-id` when available. The `name` input defaults to the repository name extracted from `GITHUB_REPOSITORY`.
 
+**Gotchas:**
+
+- **`setup` must run in the same job.** It installs `fs-cli` (curl-based installer, run as a composite step) and exports the auth env vars. `scan` neither installs nor authenticates on its own — without `setup` the step fails with `fs-cli: command not found`.
+- **`--name` is always sent, even with a project ID.** `fs-cli` requires it. If the `name` input is empty and `GITHUB_REPOSITORY` is unset (act, self-hosted shims, reusable-workflow edge cases), the action fails fast with `name is required`.
+- **`name` defaults to the repo name only, not `owner/repo`.** Two repos with the same name under different orgs collide on the platform unless you set `name` explicitly or pin `project-id`.
+- **`project-id` is forwarded verbatim to `fs-cli --project-id`.** Pass a UUID. To target a project by name, set `project-name` on `setup` (which resolves it to an ID) rather than putting a name here.
+- **`extra-args` is split on whitespace.** There is no shell-style quoting, so an argument containing a space becomes two arguments. Pass such values through a dedicated input or a config file instead.
+- **The step fails on any non-zero `fs-cli` exit, but `exit-code` is still set.** Use `continue-on-error: true` plus `steps.<id>.outputs.exit-code` when you want to inspect the code rather than fail the job.
+
 **Example:**
 
 ```yaml
@@ -736,6 +745,17 @@ jobs:
 | `upload-scan` fails with "Scan timed out" | Large binary exceeding default 600s timeout | Increase `timeout` input (e.g., `timeout: 1800` for 30 minutes)    |
 | Scan stuck in `PROCESSING`                | Platform-side processing delay              | Check FS platform dashboard for scan status; retry if needed       |
 | `upload-scan` fails with "File not found" | Build artifact not available                | Ensure the build step runs before upload-scan; check the file path |
+
+### Source scan (fs-cli)
+
+| Symptom                                           | Cause                                                 | Fix                                                                                      |
+| ------------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `fs-cli: command not found`                       | `setup` did not run in the same job (it installs it)  | Add `finite-state/setup@v1` as an earlier step in the same job                           |
+| `scan` fails with "name is required"              | Empty `name` input and no `GITHUB_REPOSITORY`         | Set the `name` input explicitly                                                          |
+| Results land in an unexpected/new project         | `name` defaulted to the repo name and created a match | Pin `project-id` on `setup`, or set `name` to the exact platform project name            |
+| `fs-cli` rejects `--project-id`                   | A project name was passed where a UUID is expected    | Use `project-name` on `setup` to resolve the name, and leave `scan`'s `project-id` unset |
+| Argument in `extra-args` arrives split or garbled | `extra-args` is whitespace-split, no quoting support  | Avoid values containing spaces; use a config file for those                              |
+| Job fails but you wanted the raw exit code        | Non-zero `fs-cli` exit calls `setFailed`              | Set `continue-on-error: true` and read `steps.<id>.outputs.exit-code`                    |
 
 ### Quality gate failures
 
