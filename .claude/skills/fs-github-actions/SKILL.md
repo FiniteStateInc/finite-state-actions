@@ -28,12 +28,13 @@ Establishes authentication and configuration context for all downstream actions 
 
 **Inputs:**
 
-| Input        | Required | Default              | Description                                               |
-| ------------ | -------- | -------------------- | --------------------------------------------------------- |
-| `api-token`  | yes      | —                    | FS API token (store in `secrets.FINITE_STATE_AUTH_TOKEN`) |
-| `domain`     | no       | `app.finitestate.io` | Platform domain                                           |
-| `project-id` | no       | —                    | Default project ID for subsequent actions                 |
-| `version-id` | no       | —                    | Default version ID for subsequent actions                 |
+| Input          | Required | Default              | Description                                                                 |
+| -------------- | -------- | -------------------- | --------------------------------------------------------------------------- |
+| `api-token`    | yes      | —                    | FS API token (store in `secrets.FINITE_STATE_AUTH_TOKEN`)                   |
+| `domain`       | no       | `app.finitestate.io` | Platform domain                                                             |
+| `project-id`   | no       | —                    | Default project ID for subsequent actions                                   |
+| `project-name` | no       | —                    | Exact project name, resolved to an ID. Mutually exclusive with `project-id` |
+| `version-id`   | no       | —                    | Default version ID for subsequent actions                                   |
 
 **Outputs:**
 
@@ -44,7 +45,15 @@ Establishes authentication and configuration context for all downstream actions 
 | `project-id` | Echoed or resolved project ID        |
 | `version-id` | Echoed or resolved version ID        |
 
-**Behavior:** Validates the token via `GET /public/v0/authUser`. Exports `FINITE_STATE_AUTH_TOKEN` and `FINITE_STATE_DOMAIN` as environment variables so downstream actions inherit auth without re-specifying. Fails fast with a clear error if auth is invalid.
+**Behavior:** Validates the token via `GET /public/v0/authUser`. Installs `fs-cli` (see below). Exports `FINITE_STATE_AUTH_TOKEN` and `FINITE_STATE_DOMAIN` as environment variables so downstream actions inherit auth without re-specifying. Fails fast with a clear error if auth is invalid.
+
+**fs-cli installation (v2 and later):** `setup` calls `GET /public/v0/cli/download?os=<os>&arch=<arch>` with the API token, downloads the binary from the returned pre-signed URL into `$RUNNER_TEMP/fs-cli`, `chmod 0755`s it, and adds that directory to `PATH`. Notes:
+
+- The runner needs no `jq`, `sudo`, or write access to `/usr/local/bin` — everything happens under `RUNNER_TEMP`.
+- The download is token-authenticated, so an expired or scope-limited token fails here rather than at scan time.
+- `os` maps from the runner as `linux`, `darwin`, or `windows`; `arch` maps to `amd64` (x64) or `arm64`. Any other platform fails fast.
+- `PATH` is exported for subsequent steps in the same job only — a later job must run `setup` again.
+- v1 installed fs-cli by piping a `customer-resources` install script to `sh`; that path is gone in v2.
 
 **Example:**
 
@@ -748,14 +757,16 @@ jobs:
 
 ### Source scan (fs-cli)
 
-| Symptom                                           | Cause                                                 | Fix                                                                                      |
-| ------------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `fs-cli: command not found`                       | `setup` did not run in the same job (it installs it)  | Add `finite-state/setup@v1` as an earlier step in the same job                           |
-| `scan` fails with "name is required"              | Empty `name` input and no `GITHUB_REPOSITORY`         | Set the `name` input explicitly                                                          |
-| Results land in an unexpected/new project         | `name` defaulted to the repo name and created a match | Pin `project-id` on `setup`, or set `name` to the exact platform project name            |
-| `fs-cli` rejects `--project-id`                   | A project name was passed where a UUID is expected    | Use `project-name` on `setup` to resolve the name, and leave `scan`'s `project-id` unset |
-| Argument in `extra-args` arrives split or garbled | `extra-args` is whitespace-split, no quoting support  | Avoid values containing spaces; use a config file for those                              |
-| Job fails but you wanted the raw exit code        | Non-zero `fs-cli` exit calls `setFailed`              | Set `continue-on-error: true` and read `steps.<id>.outputs.exit-code`                    |
+| Symptom                                            | Cause                                                     | Fix                                                                                      |
+| -------------------------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `fs-cli: command not found`                        | `setup` did not run in the same job (it installs it)      | Add `finite-state/setup@v1` as an earlier step in the same job                           |
+| `setup` fails with "not available for this runner" | Unsupported runner OS/arch for the fs-cli download        | Use a linux/darwin/windows runner on amd64 or arm64                                      |
+| `setup` fails downloading fs-cli with HTTP 403     | Pre-signed download URL expired or the token was rejected | Re-run the job; if it persists, regenerate the API token                                 |
+| `scan` fails with "name is required"               | Empty `name` input and no `GITHUB_REPOSITORY`             | Set the `name` input explicitly                                                          |
+| Results land in an unexpected/new project          | `name` defaulted to the repo name and created a match     | Pin `project-id` on `setup`, or set `name` to the exact platform project name            |
+| `fs-cli` rejects `--project-id`                    | A project name was passed where a UUID is expected        | Use `project-name` on `setup` to resolve the name, and leave `scan`'s `project-id` unset |
+| Argument in `extra-args` arrives split or garbled  | `extra-args` is whitespace-split, no quoting support      | Avoid values containing spaces; use a config file for those                              |
+| Job fails but you wanted the raw exit code         | Non-zero `fs-cli` exit calls `setFailed`                  | Set `continue-on-error: true` and read `steps.<id>.outputs.exit-code`                    |
 
 ### Quality gate failures
 

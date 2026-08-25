@@ -7,6 +7,10 @@ export interface FsClientConfig {
   domain: string
 }
 
+export interface CliDownload {
+  download_url: string
+}
+
 export interface UploadScanOptions {
   type: ScanType
   filename: string
@@ -107,6 +111,16 @@ export class FsClient {
    */
   getAuthUser(): Promise<AuthUser> {
     return this.get<AuthUser>('/authUser')
+  }
+
+  /**
+   * GET /cli/download — returns a short-lived, pre-signed URL for the fs-cli
+   * binary matching the given platform. `os` is one of linux|darwin|windows,
+   * `arch` one of amd64|arm64.
+   */
+  getCliDownloadUrl(os: string, arch: string): Promise<CliDownload> {
+    const params = new URLSearchParams({ os, arch })
+    return this.get<CliDownload>(`/cli/download?${params.toString()}`)
   }
 
   /**

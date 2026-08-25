@@ -1,5 +1,6 @@
 import * as core from '@actions/core'
 import { FsClient, resolveProjectId, writeSetupContext } from '@finite-state/core'
+import { installFsCli } from './install-cli'
 
 export async function run(): Promise<void> {
   try {
@@ -20,6 +21,9 @@ export async function run(): Promise<void> {
 
     core.info(`Authenticated as: ${authUser.email}`)
     core.info(`Organization ID: ${authUser.organizationId}`)
+
+    // ── Install fs-cli ───────────────────────────────────────────────────────
+    await installFsCli(client)
 
     // ── Resolve project ID ──────────────────────────────────────────────────
     let projectId: string | undefined

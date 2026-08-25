@@ -54,21 +54,21 @@ cd actions/setup && pnpm build
 
 Seven GitHub Actions, each with `action.yml` + `src/main.ts` + `tsconfig.json` + `__tests__/` + committed `dist/`:
 
-| Action          | Purpose                                                                      |
-| --------------- | ---------------------------------------------------------------------------- |
-| `setup`         | Auth bootstrap — validates token, resolves project name to ID, exports env   |
-| `scan`          | Run fs-cli dependency scan and upload results to the platform                |
-| `upload-scan`   | Upload firmware/SBOM files, optionally poll for scan completion              |
-| `run-report`    | Install & execute `fs-report` CLI (via pipx), parse output, upload artifacts |
-| `quality-gate`  | Evaluate findings against gate config, output pass/fail                      |
-| `pr-comment`    | Post/update PR comment with findings summary and gate results                |
-| `download-sbom` | Export CycloneDX/SPDX SBOM, upload as artifact                               |
+| Action          | Purpose                                                                                     |
+| --------------- | ------------------------------------------------------------------------------------------- |
+| `setup`         | Auth bootstrap — validates token, resolves project name to ID, exports env, installs fs-cli |
+| `scan`          | Run fs-cli dependency scan and upload results to the platform                               |
+| `upload-scan`   | Upload firmware/SBOM files, optionally poll for scan completion                             |
+| `run-report`    | Install & execute `fs-report` CLI (via pipx), parse output, upload artifacts                |
+| `quality-gate`  | Evaluate findings against gate config, output pass/fail                                     |
+| `pr-comment`    | Post/update PR comment with findings summary and gate results                               |
+| `download-sbom` | Export CycloneDX/SPDX SBOM, upload as artifact                                              |
 
 Actions chain via environment variables (set by `setup`) and step outputs (JSON, e.g. `details-json`).
 
 ### External CLIs
 
-Two actions shell out via `@actions/exec` rather than the REST API: `scan` runs `fs-cli` (installed by `setup`), `run-report` installs and runs `fs-report` through `pipx`. Tests mock `@actions/exec`, `@actions/core`, and `@finite-state/core` with `vi.mock` — no network or subprocess in tests.
+Two actions shell out via `@actions/exec` rather than the REST API: `scan` runs `fs-cli`, `run-report` installs and runs `fs-report` through `pipx`. `setup` installs `fs-cli` itself (`actions/setup/src/install-cli.ts`): it fetches a pre-signed URL from `GET /cli/download?os=&arch=`, writes the binary under `$RUNNER_TEMP/fs-cli`, and `core.addPath`s it — so `PATH` only carries fs-cli for later steps in the same job. Tests mock `@actions/exec`, `@actions/core`, and `@finite-state/core` with `vi.mock` — no network or subprocess in tests.
 
 ### Build & Release
 

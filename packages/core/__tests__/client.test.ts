@@ -51,6 +51,25 @@ describe('getAuthUser', () => {
   })
 })
 
+// ── getCliDownloadUrl ─────────────────────────────────────────────────────────
+
+describe('getCliDownloadUrl', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('calls GET /cli/download with os and arch query params', async () => {
+    const mockFetch = makeFetch({ download_url: 'https://cdn.example.com/fs-cli?sig=abc' })
+    vi.stubGlobal('fetch', mockFetch)
+
+    const client = new FsClient({ apiToken: 'tok123', domain: 'example.com' })
+    const result = await client.getCliDownloadUrl('linux', 'amd64')
+
+    const [url, opts] = mockFetch.mock.calls[0]
+    expect(url).toBe('https://example.com/api/public/v0/cli/download?os=linux&arch=amd64')
+    expect(opts.headers['X-Authorization']).toBe('tok123')
+    expect(result.download_url).toBe('https://cdn.example.com/fs-cli?sig=abc')
+  })
+})
+
 // ── createVersion ─────────────────────────────────────────────────────────────
 
 describe('createVersion', () => {

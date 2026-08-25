@@ -25724,6 +25724,15 @@ class FsClient {
         return this.get('/authUser');
     }
     /**
+     * GET /cli/download — returns a short-lived, pre-signed URL for the fs-cli
+     * binary matching the given platform. `os` is one of linux|darwin|windows,
+     * `arch` one of amd64|arm64.
+     */
+    getCliDownloadUrl(os, arch) {
+        const params = new URLSearchParams({ os, arch });
+        return this.get(`/cli/download?${params.toString()}`);
+    }
+    /**
      * GET /projects — list projects, optionally filtering by name.
      */
     async listProjects(name) {
@@ -26498,6 +26507,92 @@ function parseReportDirectory(reportDir) {
 
 /***/ }),
 
+/***/ 1151:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.installFsCli = installFsCli;
+const core = __importStar(__nccwpck_require__(4442));
+const fs = __importStar(__nccwpck_require__(1455));
+const os = __importStar(__nccwpck_require__(8161));
+const path = __importStar(__nccwpck_require__(6760));
+// ── Platform mapping ──────────────────────────────────────────────────────────
+const OS_NAMES = {
+    linux: 'linux',
+    darwin: 'darwin',
+    win32: 'windows',
+};
+const ARCH_NAMES = {
+    x64: 'amd64',
+    arm64: 'arm64',
+};
+/**
+ * Downloads fs-cli for the current runner from the platform's CLI download
+ * endpoint and puts it on PATH. Returns the path to the installed binary.
+ *
+ * The download URL returned by the API is pre-signed, so the binary itself is
+ * fetched without the auth header.
+ */
+async function installFsCli(client) {
+    const osName = OS_NAMES[process.platform];
+    const archName = ARCH_NAMES[process.arch];
+    if (!osName || !archName) {
+        throw new Error(`fs-cli is not available for this runner (${process.platform}/${process.arch}). ` +
+            `Supported: linux, darwin, windows on amd64 or arm64.`);
+    }
+    const { download_url: downloadUrl } = await client.getCliDownloadUrl(osName, archName);
+    const response = await fetch(downloadUrl);
+    if (!response.ok) {
+        throw new Error(`Failed to download fs-cli: HTTP ${response.status} from the download URL.`);
+    }
+    const installDir = path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'fs-cli');
+    await fs.mkdir(installDir, { recursive: true });
+    const binary = path.join(installDir, process.platform === 'win32' ? 'fs-cli.exe' : 'fs-cli');
+    await fs.writeFile(binary, Buffer.from(await response.arrayBuffer()));
+    await fs.chmod(binary, 0o755);
+    core.addPath(installDir);
+    core.info(`Installed fs-cli (${osName}/${archName}) to ${binary}`);
+    return binary;
+}
+
+
+/***/ }),
+
 /***/ 9026:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -26540,6 +26635,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.run = run;
 const core = __importStar(__nccwpck_require__(4442));
 const core_1 = __nccwpck_require__(2950);
+const install_cli_1 = __nccwpck_require__(1151);
 async function run() {
     try {
         // ── Read inputs ──────────────────────────────────────────────────────────
@@ -26556,6 +26652,8 @@ async function run() {
         const authUser = await client.getAuthUser();
         core.info(`Authenticated as: ${authUser.email}`);
         core.info(`Organization ID: ${authUser.organizationId}`);
+        // ── Install fs-cli ───────────────────────────────────────────────────────
+        await (0, install_cli_1.installFsCli)(client);
         // ── Resolve project ID ──────────────────────────────────────────────────
         let projectId;
         if (projectIdInput) {
@@ -26703,6 +26801,30 @@ module.exports = require("node:crypto");
 
 "use strict";
 module.exports = require("node:events");
+
+/***/ }),
+
+/***/ 1455:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("node:fs/promises");
+
+/***/ }),
+
+/***/ 8161:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("node:os");
+
+/***/ }),
+
+/***/ 6760:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("node:path");
 
 /***/ }),
 

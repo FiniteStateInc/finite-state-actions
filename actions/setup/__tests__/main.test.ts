@@ -24,6 +24,14 @@ vi.mock('@finite-state/core', () => ({
   resolveProjectId: (...args: unknown[]) => mockResolveProjectId(...args),
 }))
 
+// ── Mock the fs-cli installer ──────────────────────────────────────────────────
+
+const mockInstallFsCli = vi.fn()
+
+vi.mock('../src/install-cli', () => ({
+  installFsCli: (...args: unknown[]) => mockInstallFsCli(...args),
+}))
+
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
 
 import * as core from '@actions/core'
@@ -56,6 +64,8 @@ describe('setup action', () => {
     mockResolveProjectId.mockImplementation((_client: unknown, value: string) =>
       Promise.resolve(value),
     )
+
+    mockInstallFsCli.mockResolvedValue('/tmp/fs-cli/fs-cli')
   })
 
   it('validates auth and exports context with project-id', async () => {
@@ -79,7 +89,18 @@ describe('setup action', () => {
     expect(core.setOutput).toHaveBeenCalledWith('org-name', 'org-1')
     expect(core.setOutput).toHaveBeenCalledWith('project-id', 'proj-123')
     expect(core.setOutput).toHaveBeenCalledWith('version-id', 'ver-456')
+    expect(mockInstallFsCli).toHaveBeenCalledOnce()
     expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('fails the action when fs-cli installation fails', async () => {
+    mockInstallFsCli.mockRejectedValue(new Error('Failed to download fs-cli: HTTP 403'))
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to download fs-cli'),
+    )
   })
 
   it('resolves project-name to ID', async () => {

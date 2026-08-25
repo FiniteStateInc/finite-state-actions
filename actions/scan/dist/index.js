@@ -25724,6 +25724,15 @@ class FsClient {
         return this.get('/authUser');
     }
     /**
+     * GET /cli/download — returns a short-lived, pre-signed URL for the fs-cli
+     * binary matching the given platform. `os` is one of linux|darwin|windows,
+     * `arch` one of amd64|arm64.
+     */
+    getCliDownloadUrl(os, arch) {
+        const params = new URLSearchParams({ os, arch });
+        return this.get(`/cli/download?${params.toString()}`);
+    }
+    /**
      * GET /projects — list projects, optionally filtering by name.
      */
     async listProjects(name) {
