@@ -2,8 +2,6 @@ import * as core from '@actions/core'
 import {
   FsClient,
   ProjectNotFoundError,
-  authUserIdentity,
-  authUserOrganization,
   installFsCli,
   resolveProjectId,
   writeSetupContext,
@@ -22,24 +20,21 @@ export async function run(): Promise<void> {
       throw new Error('Provide either project-id or project-name, not both.')
     }
 
-    // ── Validate auth ────────────────────────────────────────────────────────
+    // ── Install fs-cli, which doubles as the auth check ──────────────────────
+    // The download endpoint is authenticated and 401/403 is non-retryable, so a
+    // bad token or a domain from the wrong tenant fails here — in the first
+    // step, before any downstream action runs.
     const client = new FsClient({ apiToken, domain })
-    const authUser = await client.getAuthUser()
 
-    const identity = authUserIdentity(authUser)
-    const organization = authUserOrganization(authUser)
-
-    if (!identity) {
-      core.warning(
-        'The platform accepted the token but returned an unrecognized /authUser response. ' +
-          'Check that the domain matches the tenant the token was issued from.',
+    try {
+      await installFsCli(client)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      throw new Error(
+        `Could not install fs-cli from ${domain}: ${message} — check that api-token is valid ` +
+          `for ${domain}, which must be the tenant the token was issued from.`,
       )
     }
-    core.info(`Authenticated as: ${identity ?? 'unknown'}`)
-    core.info(`Organization: ${organization ?? 'unknown'}`)
-
-    // ── Install fs-cli ───────────────────────────────────────────────────────
-    await installFsCli(client)
 
     // ── Resolve project ID ──────────────────────────────────────────────────
     let projectId: string | undefined
@@ -66,9 +61,6 @@ export async function run(): Promise<void> {
     writeSetupContext({ apiToken, domain, projectId, projectName: projectNameInput, versionId })
 
     // ── Set outputs ──────────────────────────────────────────────────────────
-    core.setOutput('user', identity ?? '')
-    core.setOutput('org-name', organization ?? '')
-
     if (projectId) {
       core.setOutput('project-id', projectId)
     }

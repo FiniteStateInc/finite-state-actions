@@ -17,6 +17,9 @@ export interface FsClientConfig {
 
 export interface CliDownload {
   download_url: string
+  /** Latest fs-cli version for the requested platform, e.g. `v2.3.30`. */
+  version?: string
+  release_date?: string
 }
 
 export interface UploadScanOptions {

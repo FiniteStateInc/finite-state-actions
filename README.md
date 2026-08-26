@@ -8,7 +8,7 @@ A collection of GitHub Actions for integrating [Finite State](https://finitestat
 | ---------------------------------------- | -------------------------------------------------------------------------------- |
 | [setup](./actions/setup)                 | Authenticate with the Finite State platform, configure env, install fs-cli       |
 | [scan](./actions/scan)                   | Scan project dependencies with fs-cli and upload results (runs standalone)       |
-| [upload](./actions/upload)               | Upload a firmware or software artifact for security scanning                     |
+| [upload](./actions/upload)               | Upload a firmware, SBOM, or third-party scan file through fs-cli (standalone)    |
 | [upload-scan](./actions/upload-scan)     | Deprecated alias for `upload`; forwards inputs and outputs, warns, removed in v3 |
 | [run-report](./actions/run-report)       | Generate security reports using fs-report                                        |
 | [quality-gate](./actions/quality-gate)   | Fail the build if findings exceed configurable thresholds                        |
@@ -193,12 +193,14 @@ jobs:
 
 Actions pass data via step outputs and environment variables. The `setup` action exports `FINITE_STATE_AUTH_TOKEN` and `FINITE_STATE_DOMAIN` as environment variables for the entire job.
 
-`setup` is optional for `scan`, which accepts `api-token`/`domain`/`project-name` directly and installs `fs-cli` when it is not already on `PATH`. Every other action requires `setup`.
+`setup` is optional for `scan` and `upload`, which accept `api-token`/`domain`/`project-name` directly and install `fs-cli` when it is not already on `PATH`. Every other action requires `setup`.
 
 ```
 setup (validates auth, exports env vars, installs fs-cli)
   |
   +---> scan (runs fs-cli scan, uploads results to platform)
+  |
+  +---> upload (runs fs-cli upload/import/third-party for a built artifact)
   |
   +---> run-report (generates findings reports)
   |       |

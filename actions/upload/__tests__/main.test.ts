@@ -1,5 +1,33 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+// ── Mock @actions/exec ─────────────────────────────────────────────────────────
+
+/** Queued fs-cli results, consumed one per exec call. */
+interface FakeRun {
+  exitCode: number
+  stdout: string
+}
+
+const execCalls: { binary: string; args: string[]; options: Record<string, unknown> }[] = []
+const runQueue: FakeRun[] = []
+let defaultRun: FakeRun = { exitCode: 0, stdout: '' }
+
+const mockExec = vi.fn(
+  async (binary: string, args: string[], options: Record<string, unknown> = {}) => {
+    execCalls.push({ binary, args, options })
+    const run = runQueue.shift() ?? defaultRun
+    const listeners = options.listeners as { stdout?: (data: Buffer) => void } | undefined
+    if (run.stdout) {
+      listeners?.stdout?.(Buffer.from(run.stdout))
+    }
+    return run.exitCode
+  },
+)
+
+vi.mock('@actions/exec', () => ({
+  exec: (...args: unknown[]) => mockExec(...(args as [string, string[], Record<string, unknown>])),
+}))
+
 // ── Mock @actions/core ─────────────────────────────────────────────────────────
 
 vi.mock('@actions/core', () => ({
@@ -15,10 +43,6 @@ vi.mock('@actions/core', () => ({
 
 // ── Mock fs ────────────────────────────────────────────────────────────────────
 
-vi.mock('fs', () => ({
-  readFileSync: vi.fn().mockReturnValue(Buffer.from('fake-file-contents')),
-}))
-
 const mockGlobMatches: string[] = []
 
 vi.mock('fs/promises', () => ({
@@ -30,44 +54,53 @@ vi.mock('fs/promises', () => ({
 
 // ── Mock @finite-state/core ────────────────────────────────────────────────────
 
-const mockCreateVersion = vi.fn()
-const mockCreateProject = vi.fn()
-const mockUploadScan = vi.fn()
-const mockPollScanCompletion = vi.fn()
-const mockResolveProjectId = vi.fn()
+const mockEnsureFsCli = vi.fn()
 
-vi.mock('@finite-state/core', () => {
-  class ProjectNotFoundError extends Error {
-    constructor(public readonly projectName: string) {
-      super(`No project found with name "${projectName}".`)
-      this.name = 'ProjectNotFoundError'
-    }
-  }
-
-  return {
-    FsClient: vi.fn().mockImplementation(() => ({
-      createVersion: mockCreateVersion,
-      createProject: mockCreateProject,
-      uploadScan: mockUploadScan,
-      pollScanCompletion: mockPollScanCompletion,
-    })),
-    ProjectNotFoundError,
-    resolveProjectId: (...args: unknown[]) => mockResolveProjectId(...args),
-    readSetupContext: vi.fn(),
-  }
-})
+vi.mock('@finite-state/core', () => ({
+  FsClient: vi.fn().mockImplementation(() => ({})),
+  ensureFsCli: (...args: unknown[]) => mockEnsureFsCli(...args),
+  readSetupContext: vi.fn(),
+}))
 
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
 
 import * as core from '@actions/core'
-import { ProjectNotFoundError, readSetupContext } from '@finite-state/core'
+import { readSetupContext } from '@finite-state/core'
 import { run } from '../src/main'
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+const UPLOAD_LINE = 'upload complete: project=proj-1 version=ver-999\n'
+
+function scanJson(counts: { total: number; completed: number; failed: number }): string {
+  return JSON.stringify({
+    projectVersionId: 'ver-999',
+    found: counts.total > 0,
+    tests: {
+      totalTests: counts.total,
+      completedTests: counts.completed,
+      failedTests: counts.failed,
+      testTypes: [{ id: 'SCA', name: 'SCA', status: 'COMPLETED' }],
+    },
+  })
+}
+
+function setInputs(inputs: Record<string, string>): void {
+  vi.mocked(core.getInput).mockImplementation((name: string) => inputs[name] ?? '')
+  vi.mocked(core.getBooleanInput).mockImplementation(
+    (name: string) => (inputs[name] ?? '') === 'true',
+  )
+}
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 describe('upload action', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    execCalls.length = 0
+    runQueue.length = 0
+    mockGlobMatches.length = 0
+    defaultRun = { exitCode: 0, stdout: '' }
 
     vi.mocked(readSetupContext).mockReturnValue({
       apiToken: 'test-token',
@@ -76,269 +109,355 @@ describe('upload action', () => {
       versionId: undefined,
     })
 
-    vi.mocked(core.getInput).mockImplementation((name: string) => {
-      const inputs: Record<string, string> = {
-        type: 'sca',
-        file: '/tmp/results.json',
-        'project-id': '',
-        version: 'v1.2.3',
-        'version-id': '',
-        'scanner-type': '',
-        'sbom-format': '',
-        'wait-for-completion': 'true',
-        timeout: '600',
-      }
-      return inputs[name] ?? ''
+    setInputs({
+      type: 'sca',
+      file: '/tmp/results.json',
+      version: 'v1.2.3',
     })
 
-    vi.mocked(core.getBooleanInput).mockImplementation((name: string) => {
-      if (name === 'wait-for-completion') return true
-      return false
-    })
-
-    mockCreateVersion.mockResolvedValue({
-      id: 'ver-999',
-      name: 'v1.2.3',
-      projectId: '42',
-      createdAt: '',
-    })
-    mockUploadScan.mockResolvedValue({ id: 'scan-123' })
-    mockCreateProject.mockResolvedValue({ id: 'proj-new', name: 'WebGoat-BINARY' })
-    mockResolveProjectId.mockResolvedValue('proj-existing')
-    mockGlobMatches.length = 0
-    mockPollScanCompletion.mockResolvedValue({
-      id: 'scan-123',
-      status: 'COMPLETED',
-      scanType: 'sca',
-      createdAt: '',
-      versionId: 'ver-999',
-    })
+    mockEnsureFsCli.mockResolvedValue('/usr/local/bin/fs-cli')
   })
 
-  it('creates version and uploads SCA scan', async () => {
+  it('uploads through fs-cli and reports the version it created', async () => {
+    runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE })
+
     await run()
 
-    // createVersion was called with the projectId and version name
-    expect(mockCreateVersion).toHaveBeenCalledWith('42', 'v1.2.3')
-
-    // uploadScan was called with the correct arguments
-    expect(mockUploadScan).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'sca',
-        filename: 'results.json',
-        projectVersionId: 'ver-999',
-      }),
+    const upload = execCalls[0]
+    expect(upload.binary).toBe('/usr/local/bin/fs-cli')
+    expect(upload.args.slice(0, 2)).toEqual(['upload', '/tmp/results.json'])
+    expect(upload.args).toEqual(
+      expect.arrayContaining([
+        '--endpoint',
+        'https://app.finitestate.io',
+        '--project-id',
+        '42',
+        '--version',
+        'v1.2.3',
+        '--type',
+        'sca',
+      ]),
     )
+    // no timeout input: fs-cli keeps its own default
+    expect(upload.args).not.toContain('--timeout')
+    // waiting is opt-in, so the upload is the only call
+    expect(execCalls).toHaveLength(1)
 
-    // pollScanCompletion was called
-    expect(mockPollScanCompletion).toHaveBeenCalledWith('ver-999', 600_000, expect.any(Number))
+    // the token travels by env, never in argv
+    expect(upload.args).not.toContain('--token')
+    expect((upload.options.env as Record<string, string>).FS_TOKEN).toBe('test-token')
 
-    // outputs were set
-    expect(core.setOutput).toHaveBeenCalledWith('scan-id', 'scan-123')
+    // version ID comes from fs-cli stdout, not an API call
     expect(core.setOutput).toHaveBeenCalledWith('version-id', 'ver-999')
-    expect(core.setOutput).toHaveBeenCalledWith('scan-status', 'COMPLETED')
-
-    // FINITE_STATE_VERSION_ID env var was exported
     expect(core.exportVariable).toHaveBeenCalledWith('FINITE_STATE_VERSION_ID', 'ver-999')
-
-    // no failure
+    expect(core.setOutput).toHaveBeenCalledWith('scan-status', 'SUBMITTED')
     expect(core.setFailed).not.toHaveBeenCalled()
   })
 
-  it('uses existing version-id without creating a new version', async () => {
-    vi.mocked(core.getInput).mockImplementation((name: string) => {
-      const inputs: Record<string, string> = {
-        type: 'sca',
-        file: '/tmp/results.json',
-        'project-id': '',
-        version: '',
-        'version-id': 'ver-existing',
-        'scanner-type': '',
-        'sbom-format': '',
-        'wait-for-completion': 'true',
-        timeout: '600',
-      }
-      return inputs[name] ?? ''
+  it('polls scan status with fs-cli query when wait-for-completion is opted into', async () => {
+    setInputs({
+      type: 'sca',
+      file: '/tmp/results.json',
+      version: 'v1.2.3',
+      'wait-for-completion': 'true',
     })
-
-    await run()
-
-    // createVersion was NOT called
-    expect(mockCreateVersion).not.toHaveBeenCalled()
-
-    // uploadScan was called with the existing version-id
-    expect(mockUploadScan).toHaveBeenCalledWith(
-      expect.objectContaining({
-        projectVersionId: 'ver-existing',
-      }),
+    runQueue.push(
+      { exitCode: 0, stdout: UPLOAD_LINE },
+      { exitCode: 0, stdout: scanJson({ total: 2, completed: 2, failed: 0 }) },
     )
 
-    expect(core.setFailed).not.toHaveBeenCalled()
-  })
-
-  it('skips polling when wait-for-completion is false', async () => {
-    vi.mocked(core.getBooleanInput).mockImplementation((name: string) => {
-      if (name === 'wait-for-completion') return false
-      return false
-    })
-
     await run()
 
-    // pollScanCompletion was NOT called
-    expect(mockPollScanCompletion).not.toHaveBeenCalled()
-
-    // scan-status set to SUBMITTED
-    expect(core.setOutput).toHaveBeenCalledWith('scan-status', 'SUBMITTED')
-
-    expect(core.setFailed).not.toHaveBeenCalled()
-  })
-
-  it('uploads once per comma-separated type', async () => {
-    vi.mocked(core.getInput).mockImplementation((name: string) => {
-      const inputs: Record<string, string> = {
-        type: 'sca,sast,config,vulnerability-analysis',
-        file: '/tmp/app.jar',
-        version: 'v1.2.3',
-        'wait-for-completion': 'false',
-        timeout: '600',
-      }
-      return inputs[name] ?? ''
-    })
-    vi.mocked(core.getBooleanInput).mockReturnValue(false)
-    mockUploadScan
-      .mockResolvedValueOnce({ id: 's1' })
-      .mockResolvedValueOnce({ id: 's2' })
-      .mockResolvedValueOnce({ id: 's3' })
-      .mockResolvedValueOnce({ id: 's4' })
-
-    await run()
-
-    expect(mockUploadScan).toHaveBeenCalledTimes(4)
-    expect(mockUploadScan.mock.calls.map((c) => c[0].type)).toEqual([
-      'sca',
-      'sast',
-      'config',
-      'vulnerability-analysis',
+    const query = execCalls[1]
+    expect(query.args).toEqual([
+      'query',
+      '--type',
+      'scan',
+      '--format',
+      'json',
+      '--endpoint',
+      'https://app.finitestate.io',
+      '--version-id',
+      'ver-999',
+      '--wait',
+      '--fail-on-scan-incomplete',
     ])
-    expect(core.setOutput).toHaveBeenCalledWith('scan-id', 's1')
-    expect(core.setOutput).toHaveBeenCalledWith('scan-ids', 's1,s2,s3,s4')
+    expect(core.setOutput).toHaveBeenCalledWith('scan-status', 'COMPLETED')
     expect(core.setFailed).not.toHaveBeenCalled()
   })
 
-  it('creates the project when project-name matches nothing', async () => {
+  it('bounds both phases when timeout is given', async () => {
+    setInputs({
+      type: 'sca',
+      file: '/tmp/results.json',
+      version: 'v1.2.3',
+      'wait-for-completion': 'true',
+      timeout: '600',
+    })
+    runQueue.push(
+      { exitCode: 0, stdout: UPLOAD_LINE },
+      { exitCode: 0, stdout: scanJson({ total: 1, completed: 1, failed: 0 }) },
+    )
+
+    await run()
+
+    expect(execCalls[0].args).toEqual(expect.arrayContaining(['--timeout', '10']))
+    expect(execCalls[1].args).toEqual(expect.arrayContaining(['--poll-timeout', '10']))
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('rejects a non-numeric timeout', async () => {
+    setInputs({
+      type: 'sca',
+      file: '/tmp/results.json',
+      version: 'v1.2.3',
+      timeout: 'ten minutes',
+    })
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(
+      expect.stringContaining('timeout must be a positive number of seconds'),
+    )
+    expect(execCalls).toHaveLength(0)
+  })
+
+  it('fails the step when fs-cli query reports a failed scan', async () => {
+    setInputs({
+      type: 'sca',
+      file: '/tmp/results.json',
+      version: 'v1.2.3',
+      'wait-for-completion': 'true',
+    })
+    runQueue.push(
+      { exitCode: 0, stdout: UPLOAD_LINE },
+      { exitCode: 111, stdout: scanJson({ total: 2, completed: 1, failed: 1 }) },
+    )
+
+    await run()
+
+    expect(core.setOutput).toHaveBeenCalledWith('scan-status', 'FAILED')
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('exit code 111'))
+  })
+
+  it('uses an existing version-id without asking fs-cli to create one', async () => {
+    setInputs({
+      type: 'sca',
+      file: '/tmp/results.json',
+      'version-id': 'ver-existing',
+      'wait-for-completion': 'false',
+    })
+
+    await run()
+
+    const upload = execCalls[0]
+    expect(upload.args).toEqual(expect.arrayContaining(['--version-id', 'ver-existing']))
+    expect(upload.args).not.toContain('--version')
+    // no upload-complete line needed: the version ID was given
+    expect(core.setOutput).toHaveBeenCalledWith('version-id', 'ver-existing')
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('skips the status query when wait-for-completion is false', async () => {
+    setInputs({
+      type: 'sca',
+      file: '/tmp/results.json',
+      version: 'v1.2.3',
+      'wait-for-completion': 'false',
+    })
+    runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE })
+
+    await run()
+
+    // upload only — no query call at all
+    expect(execCalls).toHaveLength(1)
+    expect(core.setOutput).toHaveBeenCalledWith('scan-status', 'SUBMITTED')
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('sends a comma-separated type list to fs-cli in one invocation', async () => {
+    setInputs({
+      type: 'sca,sast,config,vulnerability-analysis',
+      file: '/tmp/app.jar',
+      version: 'v1.2.3',
+      'wait-for-completion': 'false',
+    })
+    runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE })
+
+    await run()
+
+    // hyphens become underscores for fs-cli
+    expect(execCalls[0].args).toEqual(
+      expect.arrayContaining(['--type', 'sca,sast,config,vulnerability_analysis']),
+    )
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('routes sbom uploads through fs-cli import', async () => {
+    setInputs({
+      type: 'sbom',
+      'sbom-format': 'spdx',
+      file: 'sbom.spdx.json',
+      version: 'v1.2.3',
+      'wait-for-completion': 'false',
+    })
+    runQueue.push({ exitCode: 0, stdout: 'Imported SBOM: project=proj-1 version=ver-999\n' })
+
+    await run()
+
+    const args = execCalls[0].args
+    expect(args.slice(0, 2)).toEqual(['import', 'sbom.spdx.json'])
+    expect(args).toEqual(expect.arrayContaining(['--format', 'spdx']))
+    // import has no --timeout flag
+    expect(args).not.toContain('--timeout')
+    expect(core.setOutput).toHaveBeenCalledWith('version-id', 'ver-999')
+  })
+
+  it('routes third-party uploads through fs-cli third-party', async () => {
+    setInputs({
+      type: 'third-party',
+      'scanner-type': 'grype',
+      file: 'grype.json',
+      version: 'v1.2.3',
+      'wait-for-completion': 'false',
+    })
+    runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE })
+
+    await run()
+
+    const args = execCalls[0].args
+    expect(args.slice(0, 2)).toEqual(['third-party', 'grype.json'])
+    expect(args).toEqual(expect.arrayContaining(['--type', 'grype']))
+    expect(args).not.toContain('--timeout')
+  })
+
+  it('rejects mixing binary types with sbom', async () => {
+    setInputs({
+      type: 'sca,sbom',
+      file: 'thing.json',
+      version: 'v1.2.3',
+      'wait-for-completion': 'false',
+    })
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('different upload paths'))
+    expect(execCalls).toHaveLength(0)
+  })
+
+  it('fails when fs-cli exits non-zero', async () => {
+    runQueue.push({ exitCode: 1, stdout: '' })
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('exited with code 1'))
+    expect(execCalls).toHaveLength(1)
+  })
+
+  it('fails when fs-cli output carries no version ID', async () => {
+    runQueue.push({ exitCode: 0, stdout: 'uploading...\n' })
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(
+      expect.stringContaining('Could not read the version ID'),
+    )
+  })
+
+  it('lets fs-cli find-or-create the project named by project-name', async () => {
     vi.mocked(readSetupContext).mockReturnValue({
       apiToken: 'standalone-token',
       domain: 'martinjones.finitestate.io',
       projectId: undefined,
       versionId: undefined,
     })
-    vi.mocked(core.getInput).mockImplementation((name: string) => {
-      const inputs: Record<string, string> = {
-        'api-token': 'standalone-token',
-        domain: 'martinjones.finitestate.io',
-        'project-name': 'WebGoat-BINARY',
-        'project-type': 'application',
-        type: 'sca',
-        file: '/tmp/app.jar',
-        version: 'v1.2.3',
-        'wait-for-completion': 'false',
-        timeout: '600',
-      }
-      return inputs[name] ?? ''
+    setInputs({
+      'api-token': 'standalone-token',
+      domain: 'martinjones.finitestate.io',
+      'project-name': 'WebGoat-BINARY',
+      type: 'sca',
+      file: '/tmp/app.jar',
+      version: 'v1.2.3',
+      'wait-for-completion': 'false',
     })
-    vi.mocked(core.getBooleanInput).mockReturnValue(false)
-    mockResolveProjectId.mockRejectedValue(new ProjectNotFoundError('WebGoat-BINARY'))
+    runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE })
 
     await run()
 
-    expect(mockCreateProject).toHaveBeenCalledWith('WebGoat-BINARY', {
-      projectType: 'application',
-    })
-    expect(mockCreateVersion).toHaveBeenCalledWith('proj-new', 'v1.2.3')
+    expect(execCalls[0].args).toEqual(
+      expect.arrayContaining(['--name', 'WebGoat-BINARY', '--version', 'v1.2.3']),
+    )
+    expect(execCalls[0].args).not.toContain('--project-id')
     expect(core.setSecret).toHaveBeenCalledWith('standalone-token')
     expect(core.setFailed).not.toHaveBeenCalled()
   })
 
-  it('reuses an existing project matched by name', async () => {
-    vi.mocked(readSetupContext).mockReturnValue({
-      apiToken: 'test-token',
-      domain: 'app.finitestate.io',
-      projectId: undefined,
-      versionId: undefined,
+  it('warns that project-type is ignored', async () => {
+    setInputs({
+      type: 'sca',
+      file: '/tmp/app.jar',
+      version: 'v1.2.3',
+      'project-type': 'application',
+      'wait-for-completion': 'false',
     })
-    vi.mocked(core.getInput).mockImplementation((name: string) => {
-      const inputs: Record<string, string> = {
-        'project-name': 'WebGoat',
-        type: 'sca',
-        file: '/tmp/app.jar',
-        version: 'v1.2.3',
-        'wait-for-completion': 'false',
-        timeout: '600',
-      }
-      return inputs[name] ?? ''
-    })
-    vi.mocked(core.getBooleanInput).mockReturnValue(false)
+    runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE })
 
     await run()
 
-    expect(mockCreateProject).not.toHaveBeenCalled()
-    expect(mockCreateVersion).toHaveBeenCalledWith('proj-existing', 'v1.2.3')
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('project-type is ignored'))
+  })
+
+  it('fails when neither version nor version-id is given', async () => {
+    setInputs({
+      type: 'sca',
+      file: '/tmp/app.jar',
+      'wait-for-completion': 'false',
+    })
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('version-id'))
+    expect(execCalls).toHaveLength(0)
   })
 
   it('expands a glob that matches exactly one file', async () => {
-    vi.mocked(core.getInput).mockImplementation((name: string) => {
-      const inputs: Record<string, string> = {
-        type: 'sca',
-        file: 'target/webgoat-*.jar',
-        version: 'v1.2.3',
-        'wait-for-completion': 'false',
-        timeout: '600',
-      }
-      return inputs[name] ?? ''
+    setInputs({
+      type: 'sca',
+      file: 'target/webgoat-*.jar',
+      version: 'v1.2.3',
+      'wait-for-completion': 'false',
     })
-    vi.mocked(core.getBooleanInput).mockReturnValue(false)
     mockGlobMatches.push('target/webgoat-2025.4.jar')
+    runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE })
 
     await run()
 
-    expect(mockUploadScan).toHaveBeenCalledWith(
-      expect.objectContaining({ filename: 'webgoat-2025.4.jar' }),
-    )
+    expect(execCalls[0].args[1]).toBe('target/webgoat-2025.4.jar')
     expect(core.setFailed).not.toHaveBeenCalled()
   })
 
   it('fails when a glob matches more than one file', async () => {
-    vi.mocked(core.getInput).mockImplementation((name: string) => {
-      const inputs: Record<string, string> = {
-        type: 'sca',
-        file: 'target/webgoat-*.jar',
-        version: 'v1.2.3',
-        'wait-for-completion': 'false',
-        timeout: '600',
-      }
-      return inputs[name] ?? ''
+    setInputs({
+      type: 'sca',
+      file: 'target/webgoat-*.jar',
+      version: 'v1.2.3',
+      'wait-for-completion': 'false',
     })
-    vi.mocked(core.getBooleanInput).mockReturnValue(false)
     mockGlobMatches.push('target/webgoat-2025.4.jar', 'target/webgoat-2025.4-sources.jar')
 
     await run()
 
     expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('matches 2 files'))
-    expect(mockUploadScan).not.toHaveBeenCalled()
+    expect(execCalls).toHaveLength(0)
   })
 
   it('fails with a clear error when a glob matches nothing', async () => {
-    vi.mocked(core.getInput).mockImplementation((name: string) => {
-      const inputs: Record<string, string> = {
-        type: 'sca',
-        file: 'target/nope-*.jar',
-        version: 'v1.2.3',
-        'wait-for-completion': 'false',
-        timeout: '600',
-      }
-      return inputs[name] ?? ''
+    setInputs({
+      type: 'sca',
+      file: 'target/nope-*.jar',
+      version: 'v1.2.3',
+      'wait-for-completion': 'false',
     })
-    vi.mocked(core.getBooleanInput).mockReturnValue(false)
 
     await run()
 

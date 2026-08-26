@@ -24,9 +24,8 @@ inputs:
     description: 'Project name. Created if no project matches. Ignored when project-id is set.'
     required: false
   project-type:
-    description: 'Type used when creating a project: firmware, application, library, container, device, file, etc.'
+    description: 'Deprecated and ignored — fs-cli creates the project and the platform assigns its type.'
     required: false
-    default: 'firmware'
   version:
     description: 'Version name — creates a new version (mutually exclusive with version-id)'
     required: false
@@ -40,25 +39,18 @@ inputs:
     description: 'SBOM format: cdx or spdx'
     required: false
   wait-for-completion:
-    description: 'Poll until scan is done'
+    description: 'Poll until the scan finishes. Off by default — the upload returns as soon as the file is accepted.'
     required: false
-    default: 'true'
+    default: 'false'
   timeout:
-    description: 'Maximum wait time in seconds'
+    description: 'Optional maximum wait in seconds, applied to the upload and (with wait-for-completion) to the scan poll. Unset leaves fs-cli its own 30-minute default.'
     required: false
-    default: '600'
 outputs:
-  scan-id:
-    description: 'ID of the first created scan'
-    value: ${{ steps.upload.outputs.scan-id }}
-  scan-ids:
-    description: 'Comma-separated IDs of every created scan'
-    value: ${{ steps.upload.outputs.scan-ids }}
   version-id:
     description: 'ID of the project version'
     value: ${{ steps.upload.outputs.version-id }}
   scan-status:
-    description: 'Final scan status'
+    description: 'Scan rollup for the version (COMPLETED, FAILED, RUNNING, NOT_FOUND, or SUBMITTED)'
     value: ${{ steps.upload.outputs.scan-status }}
 runs:
   using: 'composite'

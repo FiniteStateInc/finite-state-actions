@@ -38,14 +38,14 @@ Establishes authentication and configuration context for all downstream actions 
 
 **Outputs:**
 
-| Output       | Description                          |
-| ------------ | ------------------------------------ |
-| `org-name`   | Organization name from auth response |
-| `user`       | Authenticated username               |
-| `project-id` | Echoed or resolved project ID        |
-| `version-id` | Echoed or resolved version ID        |
+| Output       | Description                   |
+| ------------ | ----------------------------- |
+| `project-id` | Echoed or resolved project ID |
+| `version-id` | Echoed or resolved version ID |
 
-**Behavior:** Validates the token via `GET /public/v0/authUser`. Installs `fs-cli` (see below). Exports `FINITE_STATE_AUTH_TOKEN` and `FINITE_STATE_DOMAIN` as environment variables so downstream actions inherit auth without re-specifying. Fails fast with a clear error if auth is invalid.
+> The `org-name` and `user` outputs were removed along with the `/authUser` call — `setup` no longer reads the authenticated identity.
+
+**Behavior:** Installs `fs-cli` (see below), which doubles as the token check: the download endpoint is authenticated and 401/403 is non-retryable, so a bad token or a domain from the wrong tenant fails in this first step with a message naming both. Exports `FINITE_STATE_AUTH_TOKEN` and `FINITE_STATE_DOMAIN` as environment variables so downstream actions inherit auth without re-specifying.
 
 **Unknown `project-name` is not fatal (v2.1 and later):** if the name matches no existing project, `setup` logs a warning, skips the project ID, and exports the requested name as `FINITE_STATE_PROJECT_NAME`. `scan` then passes it as `fs-cli --name`, so the platform creates the project on the first scan under the name you asked for rather than the repository name. A name matching **more than one** project still fails — there is no safe guess.
 
@@ -53,7 +53,10 @@ Establishes authentication and configuration context for all downstream actions 
 
 - The runner needs no `jq`, `sudo`, or write access to `/usr/local/bin` — everything happens under `RUNNER_TEMP`.
 - The download is token-authenticated, so an expired or scope-limited token fails here rather than at scan time.
-- `os` maps from the runner as `linux`, `darwin`, or `windows`; `arch` maps to `amd64` (x64) or `arm64`. Any other platform fails fast.
+- `os` maps from the runner as `linux`, `darwin` (macOS), or `windows`; `arch` maps to `amd64` (Node's `x64`) or `arm64`. Any other platform or architecture fails fast, naming the runner values that were rejected.
+- The bytes are verified against the runner before anything is written: the executable header (ELF `e_machine`, Mach-O `cputype`, PE `Machine`) must agree with the requested os/arch, so a Linux build on a Windows runner — or a JSON/HTML error page served in place of the binary — fails with a clear message instead of a cryptic exec error later. A universal Mach-O is accepted, since it pins no single architecture.
+- Windows installs as `fs-cli.exe`; `ensureFsCli` also looks for `.exe`/`.cmd` when reusing an fs-cli already on `PATH`.
+- The endpoint returns the release `version` alongside the URL, and it is logged — check the step log to see which fs-cli a run actually used. SHA-256 and signature metadata live on the separate scanner update-check endpoint; the install path does not verify them today.
 - `PATH` is exported for subsequent steps in the same job only — a later job must run `setup` again.
 - v1 installed fs-cli by piping a `customer-resources` install script to `sh`; that path is gone in v2.
 
@@ -129,45 +132,47 @@ Uploads a binary, SBOM, or third-party scan results for analysis. Handles all up
 
 **Inputs:**
 
-| Input                 | Required | Default    | Description                                                              |
-| --------------------- | -------- | ---------- | ------------------------------------------------------------------------ |
-| `type`                | yes      | —          | `sca`, `sast`, `config`, `vulnerability-analysis`, `sbom`, `third-party` |
-| `file`                | yes      | —          | Path to the file to upload                                               |
-| `project-id`          | no       | from setup | Override project (falls back to setup context)                           |
-| `version`             | no       | —          | Version name — creates a new version if provided                         |
-| `version-id`          | no       | —          | Existing version ID (mutually exclusive with `version`)                  |
-| `scanner-type`        | no       | —          | Required for `third-party` — e.g., `grype`, `trivy`, `snyk`              |
-| `sbom-format`         | no       | —          | Required for `sbom` — `cdx` or `spdx`                                    |
-| `wait-for-completion` | no       | `true`     | Poll scan status until done                                              |
-| `timeout`             | no       | `600`      | Max wait time in seconds                                                 |
+| Input                 | Required | Default    | Description                                                                                                                |
+| --------------------- | -------- | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `type`                | yes      | —          | `sca`, `sast`, `config`, `vulnerability-analysis`, `sbom`, `third-party`                                                   |
+| `file`                | yes      | —          | Path to the file to upload                                                                                                 |
+| `project-id`          | no       | from setup | Override project (falls back to setup context)                                                                             |
+| `version`             | no       | —          | Version name — creates a new version if provided                                                                           |
+| `version-id`          | no       | —          | Existing version ID (mutually exclusive with `version`)                                                                    |
+| `scanner-type`        | no       | —          | Required for `third-party` — e.g., `grype`, `trivy`, `snyk`                                                                |
+| `sbom-format`         | no       | —          | Required for `sbom` — `cdx` or `spdx`                                                                                      |
+| `wait-for-completion` | no       | `false`    | Poll scan status until done. Off by default — the step returns once the file is accepted                                   |
+| `timeout`             | no       | —          | Optional max wait in seconds, applied to the upload and again to the scan poll; unset leaves fs-cli its 30-minute defaults |
 
-**Upload type routing:**
+`project-type` is still accepted but ignored — `fs-cli` creates the project and the platform assigns its type. Passing it logs a warning.
 
-| Type                     | Endpoint                  | Use case                                            |
-| ------------------------ | ------------------------- | --------------------------------------------------- |
-| `sca`                    | `POST /scans`             | Binary SCA scan                                     |
-| `sast`                   | `POST /scans`             | Static analysis                                     |
-| `config`                 | `POST /scans`             | Configuration audit                                 |
-| `vulnerability-analysis` | `POST /scans`             | Reachability analysis                               |
-| `sbom`                   | `POST /scans/sbom`        | CycloneDX/SPDX import                               |
-| `third-party`            | `POST /scans/third-party` | External scanner results (Grype, Trivy, Snyk, etc.) |
+**Upload type routing:** every type goes through `fs-cli`, not the REST API — the REST upload endpoint sits behind a ~4.5 MB serverless payload cap, and `fs-cli` streams instead.
+
+| Type                     | fs-cli command       | Use case                                            |
+| ------------------------ | -------------------- | --------------------------------------------------- |
+| `sca`                    | `fs-cli upload`      | Binary SCA scan                                     |
+| `sast`                   | `fs-cli upload`      | Static analysis                                     |
+| `config`                 | `fs-cli upload`      | Configuration audit                                 |
+| `vulnerability-analysis` | `fs-cli upload`      | Reachability analysis                               |
+| `sbom`                   | `fs-cli import`      | CycloneDX/SPDX import                               |
+| `third-party`            | `fs-cli third-party` | External scanner results (Grype, Trivy, Snyk, etc.) |
 
 **Outputs:**
 
-| Output        | Description                                 |
-| ------------- | ------------------------------------------- |
-| `scan-id`     | ID of the first created scan                |
-| `scan-ids`    | Comma-separated IDs of every created scan   |
-| `version-id`  | The version ID (created or existing)        |
-| `scan-status` | Final scan status (`COMPLETED` or `FAILED`) |
+| Output        | Description                                                                    |
+| ------------- | ------------------------------------------------------------------------------ |
+| `version-id`  | The version ID (created or existing), read back from `fs-cli` output           |
+| `scan-status` | `COMPLETED`, `FAILED`, `RUNNING`, `NOT_FOUND`, or `SUBMITTED` when not waiting |
 
-**Standalone use (v2.1 and later):** like `scan`, `upload` accepts `api-token`, `domain`, and `project-name` directly, so `setup` is optional. If no project matches `project-name`, it is created via `POST /projects` using `project-type` (default `firmware`).
+> `scan-id` and `scan-ids` are no longer produced: `fs-cli` reports scans as a per-type rollup, not as individual scan record IDs. Use `version-id` downstream — every other action keys off it.
 
-**Multiple types:** `type` accepts a comma-separated list (`sca,sast,config,vulnerability-analysis`). The same file is uploaded once per type against one version. `scan-id` is the first scan; `scan-ids` lists all of them.
+**Standalone use (v2.1 and later):** like `scan`, `upload` accepts `api-token`, `domain`, and `project-name` directly, so `setup` is optional. `fs-cli` find-or-creates both the project and the version, so a name that matches nothing is created on upload.
+
+**Multiple types:** `type` accepts a comma-separated list (`sca,sast,config,vulnerability-analysis`) handled by one `fs-cli upload` invocation against one version. `sbom` and `third-party` use different commands, so they cannot be combined with each other or with the binary types — use one step per group.
 
 **Globs:** `file` may be a glob, but it must match exactly one file — `target/*.jar` in a Maven build also matches `-sources.jar` and `-javadoc.jar`, so an ambiguous match fails with the list rather than uploading the wrong artifact.
 
-**Behavior:** Resolves project/version from inputs or setup context. If `version` name is provided, creates a new version via `POST /projects/{id}/versions`. Routes to the correct upload endpoint based on `type`. When `wait-for-completion` is true, polls `GET /scans?filter=projectVersion=={pvId}` until complete or timed out.
+**Behavior:** Passes the project/version locator straight to `fs-cli` (`--name`/`--version`, or `--project-id`/`--version-id` when known), which find-or-creates both. The version ID is parsed from the `project=… version=…` line `fs-cli` prints on success. `wait-for-completion` is off by default: the step finishes as soon as the upload is accepted, leaving the platform to scan in the background, and `scan-status` reports `SUBMITTED`. Opt in and `fs-cli query --type scan --wait --fail-on-scan-incomplete` polls until every scan for the version settles; a failed scan, a poll timeout, or a version with no scans then fails the step. Firmware scans routinely run past ten minutes, so set `timeout` generously — or leave it unset for fs-cli's 30-minute default — when you do wait. The API token is passed via `FS_TOKEN`, never on the command line. The only REST call the action makes is the `fs-cli` download when the binary is not already on `PATH`.
 
 **Examples:**
 
@@ -185,6 +190,7 @@ Uploads a binary, SBOM, or third-party scan results for analysis. Handles all up
     type: third-party
     scanner-type: grype
     file: grype-results.json
+    version: 'v${{ github.sha }}'
 
 # SBOM import
 - uses: finite-state/upload@v2
@@ -192,6 +198,7 @@ Uploads a binary, SBOM, or third-party scan results for analysis. Handles all up
     type: sbom
     sbom-format: cdx
     file: sbom.json
+    version: 'v${{ github.sha }}'
 ```
 
 ---
@@ -450,13 +457,13 @@ Actions pass data via GitHub Actions step outputs and environment variables. The
 setup (validates auth, exports env vars, installs fs-cli)   [optional if only scan runs]
   |-- exports: FINITE_STATE_AUTH_TOKEN, FINITE_STATE_DOMAIN,
   |            FINITE_STATE_PROJECT_NAME (env vars for entire job)
-  |-- outputs: project-id, version-id, org-name, user
+  |-- outputs: project-id, version-id
   |
   +---> scan (runs fs-cli dependency scan, uploads results)
   |       |-- outputs: exit-code
   |
   +---> upload (uploads binary/SBOM/third-party results)
-  |       |-- outputs: scan-id, version-id, scan-status
+  |       |-- outputs: version-id, scan-status
   |
   v
 run-report (reads env + setup/upload outputs)
@@ -904,12 +911,12 @@ Commit a scoring YAML (same format as fs-report's `--scoring-file`) and pass it 
 
 ## Cross-References
 
-| Skill                 | Relationship                                                                                                                                                                                                  |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **fs-api**            | The REST API that all actions call. `setup` validates via `/authUser`. `upload` calls `/scans`. `download-sbom` calls `/sboms`. See fs-api for endpoint details, pagination, and error codes.                 |
-| **fs-report-cli**     | The CLI tool that `run-report` wraps. All recipe execution, output formats, and scoring configuration are fs-report features. See fs-report-cli for CLI flags, output structure, and caching.                 |
-| **fs-report-recipes** | The recipe catalog available in `run-report`. Each recipe has specific inputs, outputs, and use cases. See fs-report-recipes for recipe details, output files, and combination patterns.                      |
-| **fs-platform**       | Platform concepts (organizations, projects, versions, findings, VEX). Understanding the data model helps configure actions correctly. See fs-platform for hierarchy, finding lifecycle, and triage workflows. |
+| Skill                 | Relationship                                                                                                                                                                                                                                                            |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **fs-api**            | The REST API. Most work now goes through `fs-cli` instead: `setup` only calls `/cli/download` (plus a project-name lookup), `scan` and `upload` only `/cli/download`, and `download-sbom` calls `/sboms`. See fs-api for endpoint details, pagination, and error codes. |
+| **fs-report-cli**     | The CLI tool that `run-report` wraps. All recipe execution, output formats, and scoring configuration are fs-report features. See fs-report-cli for CLI flags, output structure, and caching.                                                                           |
+| **fs-report-recipes** | The recipe catalog available in `run-report`. Each recipe has specific inputs, outputs, and use cases. See fs-report-recipes for recipe details, output files, and combination patterns.                                                                                |
+| **fs-platform**       | Platform concepts (organizations, projects, versions, findings, VEX). Understanding the data model helps configure actions correctly. See fs-platform for hierarchy, finding lifecycle, and triage workflows.                                                           |
 
 ### Forge MCP tool connections
 
