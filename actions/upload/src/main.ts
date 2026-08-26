@@ -133,9 +133,12 @@ function buildFsCliArgs(opts: {
   locator: string[]
   scannerType?: string
   sbomFormat?: SbomFormat
-  timeoutMinutes: number
+  timeoutMinutes?: number
 }): string[] {
   const { types, file, locator } = opts
+
+  // Omitted when the caller set no timeout, leaving fs-cli its own default.
+  const timeout = opts.timeoutMinutes ? ['--timeout', String(opts.timeoutMinutes)] : []
 
   const binary = types.filter((t) => BINARY_TYPES.has(t))
   const special = types.filter((t) => !BINARY_TYPES.has(t))
@@ -162,15 +165,7 @@ function buildFsCliArgs(opts: {
       if (!opts.scannerType) {
         throw new Error('scanner-type is required when type is third-party.')
       }
-      return [
-        'third-party',
-        file,
-        ...locator,
-        '--type',
-        opts.scannerType,
-        '--timeout',
-        String(opts.timeoutMinutes),
-      ]
+      return ['third-party', file, ...locator, '--type', opts.scannerType, ...timeout]
     }
     throw new Error(
       `Unknown scan type "${type}". Valid: sca, sast, config, vulnerability-analysis, sbom, ` +
@@ -179,15 +174,7 @@ function buildFsCliArgs(opts: {
   }
 
   // One fs-cli upload covers every binary type in a comma-separated list.
-  return [
-    'upload',
-    file,
-    ...locator,
-    '--type',
-    binary.join(','),
-    '--timeout',
-    String(opts.timeoutMinutes),
-  ]
+  return ['upload', file, ...locator, '--type', binary.join(','), ...timeout]
 }
 
 export async function run(): Promise<void> {
@@ -208,8 +195,15 @@ export async function run(): Promise<void> {
     const scannerType = core.getInput('scanner-type') || undefined
     const sbomFormat = (core.getInput('sbom-format') || undefined) as SbomFormat | undefined
     const waitForCompletion = core.getBooleanInput('wait-for-completion')
-    const timeoutSecs = parseInt(core.getInput('timeout') || '600', 10)
-    const timeoutMinutes = Math.max(1, Math.ceil(timeoutSecs / 60))
+
+    // timeout is optional: unset means fs-cli's own defaults (30 minutes for
+    // the upload, 30 for the scan poll) rather than a bound we invented.
+    const timeoutInput = core.getInput('timeout')
+    const timeoutSecs = timeoutInput ? parseInt(timeoutInput, 10) : undefined
+    if (timeoutSecs !== undefined && (Number.isNaN(timeoutSecs) || timeoutSecs <= 0)) {
+      throw new Error(`timeout must be a positive number of seconds, got "${timeoutInput}".`)
+    }
+    const timeoutMinutes = timeoutSecs ? Math.max(1, Math.ceil(timeoutSecs / 60)) : undefined
 
     if (core.getInput('project-type')) {
       core.warning(
@@ -310,8 +304,7 @@ export async function run(): Promise<void> {
         '--version-id',
         projectVersionId,
         '--wait',
-        '--poll-timeout',
-        String(timeoutMinutes),
+        ...(timeoutMinutes ? ['--poll-timeout', String(timeoutMinutes)] : []),
         '--fail-on-scan-incomplete',
       ],
       ctx.apiToken,

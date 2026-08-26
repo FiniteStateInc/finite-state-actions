@@ -39,13 +39,12 @@ inputs:
     description: 'SBOM format: cdx or spdx'
     required: false
   wait-for-completion:
-    description: 'Poll until scan is done'
+    description: 'Poll until the scan finishes. Off by default — the upload returns as soon as the file is accepted.'
     required: false
-    default: 'true'
+    default: 'false'
   timeout:
-    description: 'Maximum wait time in seconds, applied to the upload and (with wait-for-completion) to the scan poll'
+    description: 'Optional maximum wait in seconds, applied to the upload and (with wait-for-completion) to the scan poll. Unset leaves fs-cli its own 30-minute default.'
     required: false
-    default: '600'
 outputs:
   version-id:
     description: 'ID of the project version'

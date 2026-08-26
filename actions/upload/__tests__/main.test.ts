@@ -113,18 +113,13 @@ describe('upload action', () => {
       type: 'sca',
       file: '/tmp/results.json',
       version: 'v1.2.3',
-      'wait-for-completion': 'true',
-      timeout: '600',
     })
 
     mockEnsureFsCli.mockResolvedValue('/usr/local/bin/fs-cli')
   })
 
   it('uploads through fs-cli and reports the version it created', async () => {
-    runQueue.push(
-      { exitCode: 0, stdout: UPLOAD_LINE },
-      { exitCode: 0, stdout: scanJson({ total: 1, completed: 1, failed: 0 }) },
-    )
+    runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE })
 
     await run()
 
@@ -141,10 +136,12 @@ describe('upload action', () => {
         'v1.2.3',
         '--type',
         'sca',
-        '--timeout',
-        '10',
       ]),
     )
+    // no timeout input: fs-cli keeps its own default
+    expect(upload.args).not.toContain('--timeout')
+    // waiting is opt-in, so the upload is the only call
+    expect(execCalls).toHaveLength(1)
 
     // the token travels by env, never in argv
     expect(upload.args).not.toContain('--token')
@@ -153,11 +150,17 @@ describe('upload action', () => {
     // version ID comes from fs-cli stdout, not an API call
     expect(core.setOutput).toHaveBeenCalledWith('version-id', 'ver-999')
     expect(core.exportVariable).toHaveBeenCalledWith('FINITE_STATE_VERSION_ID', 'ver-999')
-    expect(core.setOutput).toHaveBeenCalledWith('scan-status', 'COMPLETED')
+    expect(core.setOutput).toHaveBeenCalledWith('scan-status', 'SUBMITTED')
     expect(core.setFailed).not.toHaveBeenCalled()
   })
 
-  it('polls scan status with fs-cli query when wait-for-completion is true', async () => {
+  it('polls scan status with fs-cli query when wait-for-completion is opted into', async () => {
+    setInputs({
+      type: 'sca',
+      file: '/tmp/results.json',
+      version: 'v1.2.3',
+      'wait-for-completion': 'true',
+    })
     runQueue.push(
       { exitCode: 0, stdout: UPLOAD_LINE },
       { exitCode: 0, stdout: scanJson({ total: 2, completed: 2, failed: 0 }) },
@@ -177,14 +180,55 @@ describe('upload action', () => {
       '--version-id',
       'ver-999',
       '--wait',
-      '--poll-timeout',
-      '10',
       '--fail-on-scan-incomplete',
     ])
+    expect(core.setOutput).toHaveBeenCalledWith('scan-status', 'COMPLETED')
     expect(core.setFailed).not.toHaveBeenCalled()
   })
 
+  it('bounds both phases when timeout is given', async () => {
+    setInputs({
+      type: 'sca',
+      file: '/tmp/results.json',
+      version: 'v1.2.3',
+      'wait-for-completion': 'true',
+      timeout: '600',
+    })
+    runQueue.push(
+      { exitCode: 0, stdout: UPLOAD_LINE },
+      { exitCode: 0, stdout: scanJson({ total: 1, completed: 1, failed: 0 }) },
+    )
+
+    await run()
+
+    expect(execCalls[0].args).toEqual(expect.arrayContaining(['--timeout', '10']))
+    expect(execCalls[1].args).toEqual(expect.arrayContaining(['--poll-timeout', '10']))
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('rejects a non-numeric timeout', async () => {
+    setInputs({
+      type: 'sca',
+      file: '/tmp/results.json',
+      version: 'v1.2.3',
+      timeout: 'ten minutes',
+    })
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(
+      expect.stringContaining('timeout must be a positive number of seconds'),
+    )
+    expect(execCalls).toHaveLength(0)
+  })
+
   it('fails the step when fs-cli query reports a failed scan', async () => {
+    setInputs({
+      type: 'sca',
+      file: '/tmp/results.json',
+      version: 'v1.2.3',
+      'wait-for-completion': 'true',
+    })
     runQueue.push(
       { exitCode: 0, stdout: UPLOAD_LINE },
       { exitCode: 111, stdout: scanJson({ total: 2, completed: 1, failed: 1 }) },
@@ -202,7 +246,6 @@ describe('upload action', () => {
       file: '/tmp/results.json',
       'version-id': 'ver-existing',
       'wait-for-completion': 'false',
-      timeout: '600',
     })
 
     await run()
@@ -221,7 +264,6 @@ describe('upload action', () => {
       file: '/tmp/results.json',
       version: 'v1.2.3',
       'wait-for-completion': 'false',
-      timeout: '600',
     })
     runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE })
 
@@ -239,7 +281,6 @@ describe('upload action', () => {
       file: '/tmp/app.jar',
       version: 'v1.2.3',
       'wait-for-completion': 'false',
-      timeout: '600',
     })
     runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE })
 
@@ -259,7 +300,6 @@ describe('upload action', () => {
       file: 'sbom.spdx.json',
       version: 'v1.2.3',
       'wait-for-completion': 'false',
-      timeout: '600',
     })
     runQueue.push({ exitCode: 0, stdout: 'Imported SBOM: project=proj-1 version=ver-999\n' })
 
@@ -280,7 +320,6 @@ describe('upload action', () => {
       file: 'grype.json',
       version: 'v1.2.3',
       'wait-for-completion': 'false',
-      timeout: '600',
     })
     runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE })
 
@@ -289,6 +328,7 @@ describe('upload action', () => {
     const args = execCalls[0].args
     expect(args.slice(0, 2)).toEqual(['third-party', 'grype.json'])
     expect(args).toEqual(expect.arrayContaining(['--type', 'grype']))
+    expect(args).not.toContain('--timeout')
   })
 
   it('rejects mixing binary types with sbom', async () => {
@@ -297,7 +337,6 @@ describe('upload action', () => {
       file: 'thing.json',
       version: 'v1.2.3',
       'wait-for-completion': 'false',
-      timeout: '600',
     })
 
     await run()
@@ -340,7 +379,6 @@ describe('upload action', () => {
       file: '/tmp/app.jar',
       version: 'v1.2.3',
       'wait-for-completion': 'false',
-      timeout: '600',
     })
     runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE })
 
@@ -361,7 +399,6 @@ describe('upload action', () => {
       version: 'v1.2.3',
       'project-type': 'application',
       'wait-for-completion': 'false',
-      timeout: '600',
     })
     runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE })
 
@@ -375,7 +412,6 @@ describe('upload action', () => {
       type: 'sca',
       file: '/tmp/app.jar',
       'wait-for-completion': 'false',
-      timeout: '600',
     })
 
     await run()
@@ -390,7 +426,6 @@ describe('upload action', () => {
       file: 'target/webgoat-*.jar',
       version: 'v1.2.3',
       'wait-for-completion': 'false',
-      timeout: '600',
     })
     mockGlobMatches.push('target/webgoat-2025.4.jar')
     runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE })
@@ -407,7 +442,6 @@ describe('upload action', () => {
       file: 'target/webgoat-*.jar',
       version: 'v1.2.3',
       'wait-for-completion': 'false',
-      timeout: '600',
     })
     mockGlobMatches.push('target/webgoat-2025.4.jar', 'target/webgoat-2025.4-sources.jar')
 
@@ -423,7 +457,6 @@ describe('upload action', () => {
       file: 'target/nope-*.jar',
       version: 'v1.2.3',
       'wait-for-completion': 'false',
-      timeout: '600',
     })
 
     await run()

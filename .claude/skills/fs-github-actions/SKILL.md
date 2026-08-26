@@ -129,17 +129,17 @@ Uploads a binary, SBOM, or third-party scan results for analysis. Handles all up
 
 **Inputs:**
 
-| Input                 | Required | Default    | Description                                                              |
-| --------------------- | -------- | ---------- | ------------------------------------------------------------------------ |
-| `type`                | yes      | —          | `sca`, `sast`, `config`, `vulnerability-analysis`, `sbom`, `third-party` |
-| `file`                | yes      | —          | Path to the file to upload                                               |
-| `project-id`          | no       | from setup | Override project (falls back to setup context)                           |
-| `version`             | no       | —          | Version name — creates a new version if provided                         |
-| `version-id`          | no       | —          | Existing version ID (mutually exclusive with `version`)                  |
-| `scanner-type`        | no       | —          | Required for `third-party` — e.g., `grype`, `trivy`, `snyk`              |
-| `sbom-format`         | no       | —          | Required for `sbom` — `cdx` or `spdx`                                    |
-| `wait-for-completion` | no       | `true`     | Poll scan status until done                                              |
-| `timeout`             | no       | `600`      | Max wait in seconds, applied to the upload and again to the scan poll    |
+| Input                 | Required | Default    | Description                                                                                                                |
+| --------------------- | -------- | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `type`                | yes      | —          | `sca`, `sast`, `config`, `vulnerability-analysis`, `sbom`, `third-party`                                                   |
+| `file`                | yes      | —          | Path to the file to upload                                                                                                 |
+| `project-id`          | no       | from setup | Override project (falls back to setup context)                                                                             |
+| `version`             | no       | —          | Version name — creates a new version if provided                                                                           |
+| `version-id`          | no       | —          | Existing version ID (mutually exclusive with `version`)                                                                    |
+| `scanner-type`        | no       | —          | Required for `third-party` — e.g., `grype`, `trivy`, `snyk`                                                                |
+| `sbom-format`         | no       | —          | Required for `sbom` — `cdx` or `spdx`                                                                                      |
+| `wait-for-completion` | no       | `false`    | Poll scan status until done. Off by default — the step returns once the file is accepted                                   |
+| `timeout`             | no       | —          | Optional max wait in seconds, applied to the upload and again to the scan poll; unset leaves fs-cli its 30-minute defaults |
 
 `project-type` is still accepted but ignored — `fs-cli` creates the project and the platform assigns its type. Passing it logs a warning.
 
@@ -169,7 +169,7 @@ Uploads a binary, SBOM, or third-party scan results for analysis. Handles all up
 
 **Globs:** `file` may be a glob, but it must match exactly one file — `target/*.jar` in a Maven build also matches `-sources.jar` and `-javadoc.jar`, so an ambiguous match fails with the list rather than uploading the wrong artifact.
 
-**Behavior:** Passes the project/version locator straight to `fs-cli` (`--name`/`--version`, or `--project-id`/`--version-id` when known), which find-or-creates both. The version ID is parsed from the `project=… version=…` line `fs-cli` prints on success. When `wait-for-completion` is true, `fs-cli query --type scan --wait --fail-on-scan-incomplete` polls until every scan for the version settles; a failed scan, a poll timeout, or a version with no scans fails the step. The API token is passed via `FS_TOKEN`, never on the command line. The only REST call the action makes is the `fs-cli` download when the binary is not already on `PATH`.
+**Behavior:** Passes the project/version locator straight to `fs-cli` (`--name`/`--version`, or `--project-id`/`--version-id` when known), which find-or-creates both. The version ID is parsed from the `project=… version=…` line `fs-cli` prints on success. `wait-for-completion` is off by default: the step finishes as soon as the upload is accepted, leaving the platform to scan in the background, and `scan-status` reports `SUBMITTED`. Opt in and `fs-cli query --type scan --wait --fail-on-scan-incomplete` polls until every scan for the version settles; a failed scan, a poll timeout, or a version with no scans then fails the step. Firmware scans routinely run past ten minutes, so set `timeout` generously — or leave it unset for fs-cli's 30-minute default — when you do wait. The API token is passed via `FS_TOKEN`, never on the command line. The only REST call the action makes is the `fs-cli` download when the binary is not already on `PATH`.
 
 **Examples:**
 
