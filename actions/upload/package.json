@@ -1,5 +1,5 @@
 {
-  "name": "@finite-state/upload-scan",
+  "name": "@finite-state/upload",
   "version": "0.1.0",
   "private": true,
   "scripts": {

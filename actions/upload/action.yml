@@ -1,9 +1,9 @@
-name: 'Finite State Upload Scan (deprecated)'
-description: 'Deprecated alias for the upload action. Use FiniteStateInc/finite-state-actions/actions/upload instead.'
+name: 'Finite State Upload'
+description: 'Upload firmware, SBOMs, or third-party scan results to Finite State'
 author: 'Finite State Inc.'
 branding:
   icon: 'upload-cloud'
-  color: 'gray'
+  color: 'blue'
 inputs:
   type:
     description: 'Scan type: sca, sast, config, vulnerability-analysis, sbom, third-party'
@@ -37,31 +37,10 @@ inputs:
 outputs:
   scan-id:
     description: 'ID of the created scan'
-    value: ${{ steps.upload.outputs.scan-id }}
   version-id:
     description: 'ID of the project version'
-    value: ${{ steps.upload.outputs.version-id }}
   scan-status:
     description: 'Final scan status'
-    value: ${{ steps.upload.outputs.scan-status }}
 runs:
-  using: 'composite'
-  steps:
-    - name: Deprecation notice
-      shell: bash
-      run: |
-        echo "::warning title=Deprecated action::actions/upload-scan is deprecated and will be removed in v3. Switch to FiniteStateInc/finite-state-actions/actions/upload@v2 — same inputs and outputs."
-
-    - name: Upload
-      id: upload
-      uses: FiniteStateInc/finite-state-actions/actions/upload@v2
-      with:
-        type: ${{ inputs.type }}
-        file: ${{ inputs.file }}
-        project-id: ${{ inputs.project-id }}
-        version: ${{ inputs.version }}
-        version-id: ${{ inputs.version-id }}
-        scanner-type: ${{ inputs.scanner-type }}
-        sbom-format: ${{ inputs.sbom-format }}
-        wait-for-completion: ${{ inputs.wait-for-completion }}
-        timeout: ${{ inputs.timeout }}
+  using: 'node24'
+  main: 'dist/index.js'

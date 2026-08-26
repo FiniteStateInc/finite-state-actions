@@ -119,11 +119,13 @@ Runs `fs-cli scan` to analyze project dependencies and upload results to the Fin
 
 ---
 
-### upload-scan
+### upload
 
 Uploads a binary, SBOM, or third-party scan results for analysis. Handles all upload types through a single action with a `type` input.
 
-**Usage:** `finite-state/upload-scan@v2`
+**Usage:** `finite-state/upload@v2`
+
+> Renamed from `upload-scan` in v2. `actions/upload-scan` still resolves — it is a composite shim that forwards every input and output to `upload` and emits a deprecation warning. It will be removed in v3.
 
 **Inputs:**
 
@@ -164,21 +166,21 @@ Uploads a binary, SBOM, or third-party scan results for analysis. Handles all up
 
 ```yaml
 # Binary SCA scan
-- uses: finite-state/upload-scan@v2
+- uses: finite-state/upload@v2
   with:
     type: sca
     file: build/firmware.bin
     version: 'v${{ github.sha }}'
 
 # Third-party scan results
-- uses: finite-state/upload-scan@v2
+- uses: finite-state/upload@v2
   with:
     type: third-party
     scanner-type: grype
     file: grype-results.json
 
 # SBOM import
-- uses: finite-state/upload-scan@v2
+- uses: finite-state/upload@v2
   with:
     type: sbom
     sbom-format: cdx
@@ -400,14 +402,14 @@ Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
 
 **Inputs:**
 
-| Input             | Required | Default                | Description                                       |
-| ----------------- | -------- | ---------------------- | ------------------------------------------------- |
-| `version-id`      | no       | from setup/upload-scan | Falls back to setup context or upload-scan output |
-| `format`          | no       | `cyclonedx`            | `cyclonedx` or `spdx`                             |
-| `include-vex`     | no       | `true`                 | Include VEX triage data in SBOM                   |
-| `output-file`     | no       | `sbom.json`            | Output file path                                  |
-| `upload-artifact` | no       | `true`                 | Upload as workflow artifact                       |
-| `artifact-name`   | no       | `finite-state-sbom`    | Artifact name                                     |
+| Input             | Required | Default             | Description                                  |
+| ----------------- | -------- | ------------------- | -------------------------------------------- |
+| `version-id`      | no       | from setup/upload   | Falls back to setup context or upload output |
+| `format`          | no       | `cyclonedx`         | `cyclonedx` or `spdx`                        |
+| `include-vex`     | no       | `true`              | Include VEX triage data in SBOM              |
+| `output-file`     | no       | `sbom.json`         | Output file path                             |
+| `upload-artifact` | no       | `true`              | Upload as workflow artifact                  |
+| `artifact-name`   | no       | `finite-state-sbom` | Artifact name                                |
 
 **Outputs:**
 
@@ -446,11 +448,11 @@ setup (validates auth, exports env vars, installs fs-cli)   [optional if only sc
   +---> scan (runs fs-cli dependency scan, uploads results)
   |       |-- outputs: exit-code
   |
-  +---> upload-scan (uploads binary/SBOM/third-party results)
+  +---> upload (uploads binary/SBOM/third-party results)
   |       |-- outputs: scan-id, version-id, scan-status
   |
   v
-run-report (reads env + setup/upload-scan outputs)
+run-report (reads env + setup/upload outputs)
   |-- outputs: report-dir, artifact-name, summary-json, critical-count, etc.
   |-- uploads: full report directory as workflow artifact
   |
@@ -461,17 +463,17 @@ run-report (reads env + setup/upload-scan outputs)
   |       |-- outputs: comment-id, comment-url
   |
   v
-download-sbom (reads env + setup/upload-scan outputs)
+download-sbom (reads env + setup/upload outputs)
   |-- outputs: file, artifact-name, component-count
 ```
 
 ### Key chaining rules
 
 1. **setup comes first when used** -- it provides auth context via env vars, and installs fs-cli. Every action except `scan` requires it.
-2. **upload-scan before run-report** -- the scan must complete before reports can analyze it.
+2. **upload before run-report** -- the scan must complete before reports can analyze it.
 3. **run-report before quality-gate and pr-comment** -- both consume report outputs.
 4. **quality-gate before pr-comment** (optional) -- if you want gate results in the PR comment, run the gate first.
-5. **download-sbom is independent** -- it only needs setup context and optionally a version-id from upload-scan.
+5. **download-sbom is independent** -- it only needs setup context and optionally a version-id from upload.
 6. **Only `scan` runs without setup** -- it accepts `api-token`/`domain`/`project-name` directly and downloads fs-cli when PATH has none. The other actions read auth from the env vars `setup` exports, though all of them accept explicit project/version inputs instead of upstream outputs.
 
 ### Referencing upstream outputs
@@ -484,13 +486,13 @@ Use `steps.<step-id>.outputs.<output-name>`:
   with:
     api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
 
-- uses: finite-state/upload-scan@v2
+- uses: finite-state/upload@v2
   id: scan
   with:
     type: sca
     file: build/firmware.bin
 
-# Reference upload-scan's version-id
+# Reference upload's version-id
 - uses: finite-state/run-report@v2
   id: report
   with:
@@ -567,7 +569,7 @@ jobs:
           domain: ${{ vars.FINITE_STATE_DOMAIN }}
           project-id: ${{ vars.FINITE_STATE_PROJECT_ID }}
 
-      - uses: finite-state/upload-scan@v2
+      - uses: finite-state/upload@v2
         with:
           type: sca
           file: build/firmware.bin
@@ -636,7 +638,7 @@ jobs:
 
 **Key points:**
 
-- No upload-scan step needed -- reports run against existing platform data
+- No upload step needed -- reports run against existing platform data
 - Multiple recipes in a single run for a comprehensive view
 - AI analysis enabled for richer triage insights
 - Reports uploaded as artifacts -- download from the Actions run page
@@ -669,7 +671,7 @@ jobs:
           domain: ${{ vars.FINITE_STATE_DOMAIN }}
           project-id: ${{ vars.FINITE_STATE_PROJECT_ID }}
 
-      - uses: finite-state/upload-scan@v2
+      - uses: finite-state/upload@v2
         id: scan
         with:
           type: sca
@@ -719,7 +721,7 @@ jobs:
           project-id: ${{ vars.FINITE_STATE_PROJECT_ID }}
 
       # 2. Upload and scan
-      - uses: finite-state/upload-scan@v2
+      - uses: finite-state/upload@v2
         id: scan
         with:
           type: sca
@@ -786,11 +788,11 @@ jobs:
 
 ### Scan timeouts
 
-| Symptom                                   | Cause                                       | Fix                                                                |
-| ----------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------ |
-| `upload-scan` fails with "Scan timed out" | Large binary exceeding default 600s timeout | Increase `timeout` input (e.g., `timeout: 1800` for 30 minutes)    |
-| Scan stuck in `PROCESSING`                | Platform-side processing delay              | Check FS platform dashboard for scan status; retry if needed       |
-| `upload-scan` fails with "File not found" | Build artifact not available                | Ensure the build step runs before upload-scan; check the file path |
+| Symptom                              | Cause                                       | Fix                                                             |
+| ------------------------------------ | ------------------------------------------- | --------------------------------------------------------------- |
+| `upload` fails with "Scan timed out" | Large binary exceeding default 600s timeout | Increase `timeout` input (e.g., `timeout: 1800` for 30 minutes) |
+| Scan stuck in `PROCESSING`           | Platform-side processing delay              | Check FS platform dashboard for scan status; retry if needed    |
+| `upload` fails with "File not found" | Build artifact not available                | Ensure the build step runs before upload; check the file path   |
 
 ### Source scan (fs-cli)
 
@@ -867,7 +869,7 @@ Copy one of the workflows in "Common Workflow Recipes" above into `.github/workf
 
 **Step 3: Point the workflow at real inputs**
 
-Set `version` to a meaningful label (see "Version naming"), and for `upload-scan` set `file` to the customer's actual build artifact.
+Set `version` to a meaningful label (see "Version naming"), and for `upload` set `file` to the customer's actual build artifact.
 
 **Step 4: (Optional) Customize triage scoring**
 
@@ -895,7 +897,7 @@ Commit a scoring YAML (same format as fs-report's `--scoring-file`) and pass it 
 
 | Skill                 | Relationship                                                                                                                                                                                                  |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **fs-api**            | The REST API that all actions call. `setup` validates via `/authUser`. `upload-scan` calls `/scans`. `download-sbom` calls `/sboms`. See fs-api for endpoint details, pagination, and error codes.            |
+| **fs-api**            | The REST API that all actions call. `setup` validates via `/authUser`. `upload` calls `/scans`. `download-sbom` calls `/sboms`. See fs-api for endpoint details, pagination, and error codes.                 |
 | **fs-report-cli**     | The CLI tool that `run-report` wraps. All recipe execution, output formats, and scoring configuration are fs-report features. See fs-report-cli for CLI flags, output structure, and caching.                 |
 | **fs-report-recipes** | The recipe catalog available in `run-report`. Each recipe has specific inputs, outputs, and use cases. See fs-report-recipes for recipe details, output files, and combination patterns.                      |
 | **fs-platform**       | Platform concepts (organizations, projects, versions, findings, VEX). Understanding the data model helps configure actions correctly. See fs-platform for hierarchy, finding lifecycle, and triage workflows. |
@@ -910,6 +912,6 @@ Commit a scoring YAML (same format as fs-report's `--scoring-file`) and pass it 
 | `get_ci_status`       | All actions                        | Checks workflow run status                                 |
 | `get_gate_results`    | quality-gate                       | Reads gate evaluation from workflow run                    |
 | `get_pr_findings`     | pr-comment                         | Parses the PR comment for findings data                    |
-| `trigger_scan`        | upload-scan                        | Dispatches a workflow run                                  |
+| `trigger_scan`        | upload                             | Dispatches a workflow run                                  |
 | `run_triage_pipeline` | run-report (Triage Prioritization) | Same scoring model, same `scoring.yaml` format             |
 | `run_full_assessment` | run-report                         | Same report formats                                        |

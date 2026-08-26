@@ -59,11 +59,13 @@ Seven GitHub Actions, each with `action.yml` + `src/main.ts` + `tsconfig.json` +
 | --------------- | ------------------------------------------------------------------------------------------- |
 | `setup`         | Auth bootstrap — validates token, resolves project name to ID, exports env, installs fs-cli |
 | `scan`          | Run fs-cli dependency scan and upload results; works standalone via its own `api-token`     |
-| `upload-scan`   | Upload firmware/SBOM files, optionally poll for scan completion                             |
+| `upload`        | Upload firmware/SBOM files, optionally poll for scan completion                             |
 | `run-report`    | Install & execute `fs-report` CLI (via pipx), parse output, upload artifacts                |
 | `quality-gate`  | Evaluate findings against gate config, output pass/fail                                     |
 | `pr-comment`    | Post/update PR comment with findings summary and gate results                               |
 | `download-sbom` | Export CycloneDX/SPDX SBOM, upload as artifact                                              |
+
+Plus `actions/upload-scan/` — a deprecated alias for `upload`, kept for consumers pinned to the old path. It is `action.yml` only: a composite that warns and forwards to `.../actions/upload@v2`. No `package.json`, so pnpm's `actions/*` glob skips it and it needs no bundle. Remove it in v3.
 
 Actions chain via environment variables (set by `setup`) and step outputs (JSON, e.g. `details-json`).
 

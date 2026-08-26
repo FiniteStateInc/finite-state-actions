@@ -4,15 +4,16 @@ A collection of GitHub Actions for integrating [Finite State](https://finitestat
 
 ## Actions
 
-| Action                                   | Description                                                                |
-| ---------------------------------------- | -------------------------------------------------------------------------- |
-| [setup](./actions/setup)                 | Authenticate with the Finite State platform, configure env, install fs-cli |
-| [scan](./actions/scan)                   | Scan project dependencies with fs-cli and upload results (runs standalone) |
-| [upload-scan](./actions/upload-scan)     | Upload a firmware or software artifact for security scanning               |
-| [run-report](./actions/run-report)       | Generate security reports using fs-report                                  |
-| [quality-gate](./actions/quality-gate)   | Fail the build if findings exceed configurable thresholds                  |
-| [pr-comment](./actions/pr-comment)       | Post a findings summary as a pull request comment                          |
-| [download-sbom](./actions/download-sbom) | Download the SBOM for a project version                                    |
+| Action                                   | Description                                                                      |
+| ---------------------------------------- | -------------------------------------------------------------------------------- |
+| [setup](./actions/setup)                 | Authenticate with the Finite State platform, configure env, install fs-cli       |
+| [scan](./actions/scan)                   | Scan project dependencies with fs-cli and upload results (runs standalone)       |
+| [upload](./actions/upload)               | Upload a firmware or software artifact for security scanning                     |
+| [upload-scan](./actions/upload-scan)     | Deprecated alias for `upload`; forwards inputs and outputs, warns, removed in v3 |
+| [run-report](./actions/run-report)       | Generate security reports using fs-report                                        |
+| [quality-gate](./actions/quality-gate)   | Fail the build if findings exceed configurable thresholds                        |
+| [pr-comment](./actions/pr-comment)       | Post a findings summary as a pull request comment                                |
+| [download-sbom](./actions/download-sbom) | Download the SBOM for a project version                                          |
 
 ## Quick Start
 

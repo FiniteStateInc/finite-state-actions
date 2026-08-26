@@ -41,7 +41,7 @@ import { run } from '../src/main'
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
-describe('upload-scan action', () => {
+describe('upload action', () => {
   beforeEach(() => {
     vi.clearAllMocks()
 
