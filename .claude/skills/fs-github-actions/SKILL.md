@@ -38,14 +38,14 @@ Establishes authentication and configuration context for all downstream actions 
 
 **Outputs:**
 
-| Output       | Description                          |
-| ------------ | ------------------------------------ |
-| `org-name`   | Organization name from auth response |
-| `user`       | Authenticated username               |
-| `project-id` | Echoed or resolved project ID        |
-| `version-id` | Echoed or resolved version ID        |
+| Output       | Description                   |
+| ------------ | ----------------------------- |
+| `project-id` | Echoed or resolved project ID |
+| `version-id` | Echoed or resolved version ID |
 
-**Behavior:** Validates the token via `GET /public/v0/authUser`. Installs `fs-cli` (see below). Exports `FINITE_STATE_AUTH_TOKEN` and `FINITE_STATE_DOMAIN` as environment variables so downstream actions inherit auth without re-specifying. Fails fast with a clear error if auth is invalid.
+> The `org-name` and `user` outputs were removed along with the `/authUser` call — `setup` no longer reads the authenticated identity.
+
+**Behavior:** Installs `fs-cli` (see below), which doubles as the token check: the download endpoint is authenticated and 401/403 is non-retryable, so a bad token or a domain from the wrong tenant fails in this first step with a message naming both. Exports `FINITE_STATE_AUTH_TOKEN` and `FINITE_STATE_DOMAIN` as environment variables so downstream actions inherit auth without re-specifying.
 
 **Unknown `project-name` is not fatal (v2.1 and later):** if the name matches no existing project, `setup` logs a warning, skips the project ID, and exports the requested name as `FINITE_STATE_PROJECT_NAME`. `scan` then passes it as `fs-cli --name`, so the platform creates the project on the first scan under the name you asked for rather than the repository name. A name matching **more than one** project still fails — there is no safe guess.
 
@@ -454,7 +454,7 @@ Actions pass data via GitHub Actions step outputs and environment variables. The
 setup (validates auth, exports env vars, installs fs-cli)   [optional if only scan runs]
   |-- exports: FINITE_STATE_AUTH_TOKEN, FINITE_STATE_DOMAIN,
   |            FINITE_STATE_PROJECT_NAME (env vars for entire job)
-  |-- outputs: project-id, version-id, org-name, user
+  |-- outputs: project-id, version-id
   |
   +---> scan (runs fs-cli dependency scan, uploads results)
   |       |-- outputs: exit-code
@@ -908,12 +908,12 @@ Commit a scoring YAML (same format as fs-report's `--scoring-file`) and pass it 
 
 ## Cross-References
 
-| Skill                 | Relationship                                                                                                                                                                                                  |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **fs-api**            | The REST API that all actions call. `setup` validates via `/authUser`. `upload` calls `/scans`. `download-sbom` calls `/sboms`. See fs-api for endpoint details, pagination, and error codes.                 |
-| **fs-report-cli**     | The CLI tool that `run-report` wraps. All recipe execution, output formats, and scoring configuration are fs-report features. See fs-report-cli for CLI flags, output structure, and caching.                 |
-| **fs-report-recipes** | The recipe catalog available in `run-report`. Each recipe has specific inputs, outputs, and use cases. See fs-report-recipes for recipe details, output files, and combination patterns.                      |
-| **fs-platform**       | Platform concepts (organizations, projects, versions, findings, VEX). Understanding the data model helps configure actions correctly. See fs-platform for hierarchy, finding lifecycle, and triage workflows. |
+| Skill                 | Relationship                                                                                                                                                                                                                                                            |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **fs-api**            | The REST API. Most work now goes through `fs-cli` instead: `setup` only calls `/cli/download` (plus a project-name lookup), `scan` and `upload` only `/cli/download`, and `download-sbom` calls `/sboms`. See fs-api for endpoint details, pagination, and error codes. |
+| **fs-report-cli**     | The CLI tool that `run-report` wraps. All recipe execution, output formats, and scoring configuration are fs-report features. See fs-report-cli for CLI flags, output structure, and caching.                                                                           |
+| **fs-report-recipes** | The recipe catalog available in `run-report`. Each recipe has specific inputs, outputs, and use cases. See fs-report-recipes for recipe details, output files, and combination patterns.                                                                                |
+| **fs-platform**       | Platform concepts (organizations, projects, versions, findings, VEX). Understanding the data model helps configure actions correctly. See fs-platform for hierarchy, finding lifecycle, and triage workflows.                                                           |
 
 ### Forge MCP tool connections
 

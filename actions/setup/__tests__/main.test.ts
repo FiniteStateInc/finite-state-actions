@@ -14,7 +14,6 @@ vi.mock('@actions/core', () => ({
 
 // ── Mock @finite-state/core ────────────────────────────────────────────────────
 
-const mockGetAuthUser = vi.fn()
 const mockResolveProjectId = vi.fn()
 const mockInstallFsCli = vi.fn()
 
@@ -28,13 +27,8 @@ vi.mock('@finite-state/core', () => {
   }
 
   return {
-    FsClient: vi.fn().mockImplementation(() => ({
-      getAuthUser: mockGetAuthUser,
-    })),
+    FsClient: vi.fn().mockImplementation(() => ({})),
     ProjectNotFoundError,
-    authUserIdentity: (u: Record<string, unknown>) => u?.user ?? u?.email ?? undefined,
-    authUserOrganization: (u: { organization?: { name?: string; id?: string } }) =>
-      u?.organization?.name ?? u?.organization?.id ?? undefined,
     installFsCli: (...args: unknown[]) => mockInstallFsCli(...args),
     writeSetupContext: vi.fn(),
     resolveProjectId: (...args: unknown[]) => mockResolveProjectId(...args),
@@ -64,11 +58,6 @@ describe('setup action', () => {
       return inputs[name] ?? ''
     })
 
-    mockGetAuthUser.mockResolvedValue({
-      user: 'testuser@example.com',
-      organization: { id: 'org-1', name: 'Test Org' },
-    })
-
     mockResolveProjectId.mockImplementation((_client: unknown, value: string) =>
       Promise.resolve(value),
     )
@@ -76,14 +65,13 @@ describe('setup action', () => {
     mockInstallFsCli.mockResolvedValue('/tmp/fs-cli/fs-cli')
   })
 
-  it('validates auth and exports context with project-id', async () => {
+  it('installs fs-cli and exports context with project-id', async () => {
     await run()
 
     expect(FsClient).toHaveBeenCalledWith({
       apiToken: 'test-token',
       domain: 'app.finitestate.io',
     })
-    expect(mockGetAuthUser).toHaveBeenCalled()
     expect(mockResolveProjectId).not.toHaveBeenCalled()
 
     expect(writeSetupContext).toHaveBeenCalledWith({
@@ -93,8 +81,6 @@ describe('setup action', () => {
       versionId: 'ver-456',
     })
 
-    expect(core.setOutput).toHaveBeenCalledWith('user', 'testuser@example.com')
-    expect(core.setOutput).toHaveBeenCalledWith('org-name', 'Test Org')
     expect(core.setOutput).toHaveBeenCalledWith('project-id', 'proj-123')
     expect(core.setOutput).toHaveBeenCalledWith('version-id', 'ver-456')
     expect(mockInstallFsCli).toHaveBeenCalledOnce()
@@ -109,6 +95,8 @@ describe('setup action', () => {
     expect(core.setFailed).toHaveBeenCalledWith(
       expect.stringContaining('Failed to download fs-cli'),
     )
+    // the wrapper points at the likely cause
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('api-token is valid'))
   })
 
   it('resolves project-name to ID', async () => {
@@ -155,13 +143,14 @@ describe('setup action', () => {
   })
 
   it('fails with clear error on invalid auth (401)', async () => {
-    mockGetAuthUser.mockRejectedValue(
+    mockInstallFsCli.mockRejectedValue(
       new Error('Unauthorized (401): Invalid or missing API token.'),
     )
 
     await run()
 
     expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('Unauthorized (401)'))
+    expect(mockResolveProjectId).not.toHaveBeenCalled()
   })
 
   it('warns and continues when the project name does not exist yet', async () => {
@@ -206,14 +195,5 @@ describe('setup action', () => {
 
     expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('Multiple projects match'))
     expect(core.warning).not.toHaveBeenCalled()
-  })
-
-  it('warns when /authUser returns an unrecognized shape', async () => {
-    mockGetAuthUser.mockResolvedValue({ somethingElse: true })
-
-    await run()
-
-    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('unrecognized /authUser'))
-    expect(core.setFailed).not.toHaveBeenCalled()
   })
 })

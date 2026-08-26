@@ -26733,19 +26733,19 @@ async function run() {
         if (projectIdInput && projectNameInput) {
             throw new Error('Provide either project-id or project-name, not both.');
         }
-        // ── Validate auth ────────────────────────────────────────────────────────
+        // ── Install fs-cli, which doubles as the auth check ──────────────────────
+        // The download endpoint is authenticated and 401/403 is non-retryable, so a
+        // bad token or a domain from the wrong tenant fails here — in the first
+        // step, before any downstream action runs.
         const client = new core_1.FsClient({ apiToken, domain });
-        const authUser = await client.getAuthUser();
-        const identity = (0, core_1.authUserIdentity)(authUser);
-        const organization = (0, core_1.authUserOrganization)(authUser);
-        if (!identity) {
-            core.warning('The platform accepted the token but returned an unrecognized /authUser response. ' +
-                'Check that the domain matches the tenant the token was issued from.');
+        try {
+            await (0, core_1.installFsCli)(client);
         }
-        core.info(`Authenticated as: ${identity ?? 'unknown'}`);
-        core.info(`Organization: ${organization ?? 'unknown'}`);
-        // ── Install fs-cli ───────────────────────────────────────────────────────
-        await (0, core_1.installFsCli)(client);
+        catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new Error(`Could not install fs-cli from ${domain}: ${message} — check that api-token is valid ` +
+                `for ${domain}, which must be the tenant the token was issued from.`);
+        }
         // ── Resolve project ID ──────────────────────────────────────────────────
         let projectId;
         if (projectIdInput) {
@@ -26769,8 +26769,6 @@ async function run() {
         // ── Export context for downstream actions ────────────────────────────────
         (0, core_1.writeSetupContext)({ apiToken, domain, projectId, projectName: projectNameInput, versionId });
         // ── Set outputs ──────────────────────────────────────────────────────────
-        core.setOutput('user', identity ?? '');
-        core.setOutput('org-name', organization ?? '');
         if (projectId) {
             core.setOutput('project-id', projectId);
         }

@@ -22,10 +22,6 @@ inputs:
     description: 'Default version ID for subsequent actions'
     required: false
 outputs:
-  org-name:
-    description: 'Organization name'
-  user:
-    description: 'Authenticated username'
   project-id:
     description: 'Project ID (echoed or resolved)'
   version-id:
