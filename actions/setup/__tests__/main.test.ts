@@ -8,6 +8,7 @@ vi.mock('@actions/core', () => ({
   setFailed: vi.fn(),
   setSecret: vi.fn(),
   exportVariable: vi.fn(),
+  warning: vi.fn(),
   info: vi.fn(),
 }))
 
@@ -15,27 +16,32 @@ vi.mock('@actions/core', () => ({
 
 const mockGetAuthUser = vi.fn()
 const mockResolveProjectId = vi.fn()
-
-vi.mock('@finite-state/core', () => ({
-  FsClient: vi.fn().mockImplementation(() => ({
-    getAuthUser: mockGetAuthUser,
-  })),
-  writeSetupContext: vi.fn(),
-  resolveProjectId: (...args: unknown[]) => mockResolveProjectId(...args),
-}))
-
-// ── Mock the fs-cli installer ──────────────────────────────────────────────────
-
 const mockInstallFsCli = vi.fn()
 
-vi.mock('../src/install-cli', () => ({
-  installFsCli: (...args: unknown[]) => mockInstallFsCli(...args),
-}))
+vi.mock('@finite-state/core', () => {
+  // Declared inside the factory: vi.mock is hoisted above module scope.
+  class ProjectNotFoundError extends Error {
+    constructor(public readonly projectName: string) {
+      super(`No project found with name "${projectName}".`)
+      this.name = 'ProjectNotFoundError'
+    }
+  }
+
+  return {
+    FsClient: vi.fn().mockImplementation(() => ({
+      getAuthUser: mockGetAuthUser,
+    })),
+    ProjectNotFoundError,
+    installFsCli: (...args: unknown[]) => mockInstallFsCli(...args),
+    writeSetupContext: vi.fn(),
+    resolveProjectId: (...args: unknown[]) => mockResolveProjectId(...args),
+  }
+})
 
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
 
 import * as core from '@actions/core'
-import { FsClient, writeSetupContext } from '@finite-state/core'
+import { FsClient, ProjectNotFoundError, writeSetupContext } from '@finite-state/core'
 import { run } from '../src/main'
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -154,5 +160,49 @@ describe('setup action', () => {
     await run()
 
     expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('Unauthorized (401)'))
+  })
+
+  it('warns and continues when the project name does not exist yet', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        'api-token': 'test-token',
+        domain: 'app.finitestate.io',
+        'project-id': '',
+        'project-name': 'WebGoat',
+        'version-id': '',
+      }
+      return inputs[name] ?? ''
+    })
+
+    mockResolveProjectId.mockRejectedValue(new ProjectNotFoundError('WebGoat'))
+
+    await run()
+
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('No existing project'))
+    expect(core.setFailed).not.toHaveBeenCalled()
+    expect(writeSetupContext).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: undefined, projectName: 'WebGoat' }),
+    )
+    expect(core.setOutput).not.toHaveBeenCalledWith('project-id', expect.anything())
+  })
+
+  it('still fails when the project name is ambiguous', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        'api-token': 'test-token',
+        domain: 'app.finitestate.io',
+        'project-id': '',
+        'project-name': 'WebGoat',
+        'version-id': '',
+      }
+      return inputs[name] ?? ''
+    })
+
+    mockResolveProjectId.mockRejectedValue(new Error('Multiple projects match name "WebGoat"'))
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('Multiple projects match'))
+    expect(core.warning).not.toHaveBeenCalled()
   })
 })

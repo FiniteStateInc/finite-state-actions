@@ -44,8 +44,9 @@ cd actions/setup && pnpm build
 `@finite-state/core` — imported by all actions via `workspace:*`. Everything is re-exported from `src/index.ts`.
 
 - **client.ts** — `FsClient` wraps Finite State REST API. Retry logic: exponential backoff (`2^attempt * 500ms`), 6 retries for 429/502/503/504. Non-retryable: 400/401/403/404/500.
-- **context.ts** — Reads/writes `FINITE_STATE_AUTH_TOKEN`, `FINITE_STATE_DOMAIN`, `FINITE_STATE_PROJECT_ID`, `FINITE_STATE_VERSION_ID` environment variables via `@actions/core`. The `setup` action calls `writeSetupContext()`; downstream actions call `readSetupContext()`.
+- **context.ts** — Reads/writes `FINITE_STATE_AUTH_TOKEN`, `FINITE_STATE_DOMAIN`, `FINITE_STATE_PROJECT_ID`, `FINITE_STATE_PROJECT_NAME`, `FINITE_STATE_VERSION_ID` environment variables via `@actions/core`. The `setup` action calls `writeSetupContext()`; downstream actions call `readSetupContext()`.
 - **models.ts** — Shared enums (`Severity`, `ScanType`, `GateMode`, `SbomFormat`, etc.) and interfaces (`Finding`, `GateResult`, `ReportSummary`, etc.).
+- **client.ts / `ProjectNotFoundError`** — thrown by `resolveProjectId` when a name matches zero projects. `setup` catches it and continues without an ID (fs-cli creates the project later); an ambiguous name still fails hard.
 - **gates.ts** — `evaluateGates()` — three modes: `delta`, `threshold`, `triage-priority`.
 - **report-parser.ts** — Parses CSV output from `fs-report` tool (triage and version-delta formats).
 - **formatting.ts** — Renders markdown for PR comments; edit-in-place works by embedding an HTML comment tag the action greps for on re-run.
@@ -57,7 +58,7 @@ Seven GitHub Actions, each with `action.yml` + `src/main.ts` + `tsconfig.json` +
 | Action          | Purpose                                                                                     |
 | --------------- | ------------------------------------------------------------------------------------------- |
 | `setup`         | Auth bootstrap — validates token, resolves project name to ID, exports env, installs fs-cli |
-| `scan`          | Run fs-cli dependency scan and upload results to the platform                               |
+| `scan`          | Run fs-cli dependency scan and upload results; works standalone via its own `api-token`     |
 | `upload-scan`   | Upload firmware/SBOM files, optionally poll for scan completion                             |
 | `run-report`    | Install & execute `fs-report` CLI (via pipx), parse output, upload artifacts                |
 | `quality-gate`  | Evaluate findings against gate config, output pass/fail                                     |
@@ -68,7 +69,7 @@ Actions chain via environment variables (set by `setup`) and step outputs (JSON,
 
 ### External CLIs
 
-Two actions shell out via `@actions/exec` rather than the REST API: `scan` runs `fs-cli`, `run-report` installs and runs `fs-report` through `pipx`. `setup` installs `fs-cli` itself (`actions/setup/src/install-cli.ts`): it fetches a pre-signed URL from `GET /cli/download?os=&arch=`, writes the binary under `$RUNNER_TEMP/fs-cli`, and `core.addPath`s it — so `PATH` only carries fs-cli for later steps in the same job. Tests mock `@actions/exec`, `@actions/core`, and `@finite-state/core` with `vi.mock` — no network or subprocess in tests.
+Two actions shell out via `@actions/exec` rather than the REST API: `scan` runs `fs-cli`, `run-report` installs and runs `fs-report` through `pipx`. `setup` and `scan` install `fs-cli` via shared core code (`packages/core/src/install-cli.ts`: `installFsCli` always downloads, `ensureFsCli` reuses an fs-cli already on `PATH`): it fetches a pre-signed URL from `GET /cli/download?os=&arch=`, writes the binary under `$RUNNER_TEMP/fs-cli`, and `core.addPath`s it — so `PATH` only carries fs-cli for later steps in the same job. Tests mock `@actions/exec`, `@actions/core`, and `@finite-state/core` with `vi.mock` — no network or subprocess in tests.
 
 ### Build & Release
 

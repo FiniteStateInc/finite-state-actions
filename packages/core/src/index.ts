@@ -1,5 +1,6 @@
 export * from './models'
 export * from './client'
+export * from './install-cli'
 export * from './context'
 export * from './report-parser'
 export * from './gates'

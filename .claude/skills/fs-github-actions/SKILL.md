@@ -47,6 +47,8 @@ Establishes authentication and configuration context for all downstream actions 
 
 **Behavior:** Validates the token via `GET /public/v0/authUser`. Installs `fs-cli` (see below). Exports `FINITE_STATE_AUTH_TOKEN` and `FINITE_STATE_DOMAIN` as environment variables so downstream actions inherit auth without re-specifying. Fails fast with a clear error if auth is invalid.
 
+**Unknown `project-name` is not fatal (v2.1 and later):** if the name matches no existing project, `setup` logs a warning, skips the project ID, and exports the requested name as `FINITE_STATE_PROJECT_NAME`. `scan` then passes it as `fs-cli --name`, so the platform creates the project on the first scan under the name you asked for rather than the repository name. A name matching **more than one** project still fails — there is no safe guess.
+
 **fs-cli installation (v2 and later):** `setup` calls `GET /public/v0/cli/download?os=<os>&arch=<arch>` with the API token, downloads the binary from the returned pre-signed URL into `$RUNNER_TEMP/fs-cli`, `chmod 0755`s it, and adds that directory to `PATH`. Notes:
 
 - The runner needs no `jq`, `sudo`, or write access to `/usr/local/bin` — everything happens under `RUNNER_TEMP`.
@@ -70,19 +72,24 @@ Establishes authentication and configuration context for all downstream actions 
 
 ### scan
 
-Runs `fs-cli scan` to analyze project dependencies and upload results to the Finite State platform. Requires `setup` to run first (for auth context and fs-cli installation).
+Runs `fs-cli scan` to analyze project dependencies and upload results to the Finite State platform.
+
+**Standalone use (v2.1 and later):** `setup` is optional. Pass `api-token` (and `domain`/`project-name` as needed) directly to `scan` and it downloads fs-cli itself. When `setup` did run, `scan` reuses the fs-cli already on `PATH` and inherits auth from the exported env — no second download.
 
 **Usage:** `finite-state/scan@v1`
 
 **Inputs:**
 
-| Input        | Required | Default    | Description                                                     |
-| ------------ | -------- | ---------- | --------------------------------------------------------------- |
-| `dir`        | no       | `.`        | Directory to scan                                               |
-| `project-id` | no       | from setup | Project ID (UUID). Overrides value from setup.                  |
-| `version`    | yes      | —          | Version label for the scan (e.g. `v1.2.3` or `pr-42`)           |
-| `name`       | no       | repo name  | Project name sent to the platform. Defaults to repository name. |
-| `extra-args` | no       | —          | Additional arguments passed to `fs-cli scan`                    |
+| Input          | Required | Default    | Description                                                             |
+| -------------- | -------- | ---------- | ----------------------------------------------------------------------- |
+| `api-token`    | no       | from setup | FS API token. Required only when `setup` did not run in this job        |
+| `domain`       | no       | from setup | Platform domain. Falls back to setup context, then `app.finitestate.io` |
+| `project-name` | no       | —          | Alias for `name`; created by the platform if it does not exist          |
+| `dir`          | no       | `.`        | Directory to scan                                                       |
+| `project-id`   | no       | from setup | Project ID (UUID). Overrides value from setup.                          |
+| `version`      | yes      | —          | Version label for the scan (e.g. `v1.2.3` or `pr-42`)                   |
+| `name`         | no       | repo name  | Project name sent to the platform. Defaults to repository name.         |
+| `extra-args`   | no       | —          | Additional arguments passed to `fs-cli scan`                            |
 
 **Outputs:**
 
@@ -94,9 +101,9 @@ Runs `fs-cli scan` to analyze project dependencies and upload results to the Fin
 
 **Gotchas:**
 
-- **`setup` must run in the same job.** It installs `fs-cli` (curl-based installer, run as a composite step) and exports the auth env vars. `scan` neither installs nor authenticates on its own — without `setup` the step fails with `fs-cli: command not found`.
+- **`setup` is optional as of v2.1.** Without it, pass `api-token` to `scan`; it resolves fs-cli via `PATH` and downloads it when absent. Chaining `setup` first is still cheaper across multi-step jobs, since the download happens once.
 - **`--name` is always sent, even with a project ID.** `fs-cli` requires it. If the `name` input is empty and `GITHUB_REPOSITORY` is unset (act, self-hosted shims, reusable-workflow edge cases), the action fails fast with `name is required`.
-- **`name` defaults to the repo name only, not `owner/repo`.** Two repos with the same name under different orgs collide on the platform unless you set `name` explicitly or pin `project-id`.
+- **`name` resolution order is `name` input → `FINITE_STATE_PROJECT_NAME` from setup's `project-name` → repo name.** The repo-name fallback is the bare name, not `owner/repo`.
 - **`project-id` is forwarded verbatim to `fs-cli --project-id`.** Pass a UUID. To target a project by name, set `project-name` on `setup` (which resolves it to an ID) rather than putting a name here.
 - **`extra-args` is split on whitespace.** There is no shell-style quoting, so an argument containing a space becomes two arguments. Pass such values through a dedicated input or a config file instead.
 - **The step fails on any non-zero `fs-cli` exit, but `exit-code` is still set.** Use `continue-on-error: true` plus `steps.<id>.outputs.exit-code` when you want to inspect the code rather than fail the job.
@@ -759,7 +766,7 @@ jobs:
 
 | Symptom                                            | Cause                                                     | Fix                                                                                      |
 | -------------------------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `fs-cli: command not found`                        | `setup` did not run in the same job (it installs it)      | Add `finite-state/setup@v1` as an earlier step in the same job                           |
+| `FINITE_STATE_AUTH_TOKEN is not set`               | Neither `setup` ran nor `api-token` was passed to `scan`  | Add `finite-state/setup`, or pass `api-token` directly to `scan`                         |
 | `setup` fails with "not available for this runner" | Unsupported runner OS/arch for the fs-cli download        | Use a linux/darwin/windows runner on amd64 or arm64                                      |
 | `setup` fails downloading fs-cli with HTTP 403     | Pre-signed download URL expired or the token was rejected | Re-run the job; if it persists, regenerate the API token                                 |
 | `scan` fails with "name is required"               | Empty `name` input and no `GITHUB_REPOSITORY`             | Set the `name` input explicitly                                                          |

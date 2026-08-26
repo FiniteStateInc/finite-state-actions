@@ -5,6 +5,15 @@ branding:
   icon: 'search'
   color: 'blue'
 inputs:
+  api-token:
+    description: 'Finite State API token. Only needed when the setup action did not run in this job.'
+    required: false
+  domain:
+    description: 'Finite State platform domain. Defaults to the setup context, then app.finitestate.io.'
+    required: false
+  project-name:
+    description: 'Project name sent to the platform. Alias for name; the platform creates the project if it does not exist.'
+    required: false
   dir:
     description: 'Directory to scan'
     required: false
@@ -25,5 +34,5 @@ outputs:
   exit-code:
     description: 'Exit code from fs-cli scan'
 runs:
-  using: 'node20'
+  using: 'node24'
   main: 'dist/index.js'

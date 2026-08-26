@@ -77,3 +77,35 @@ describe('readSetupContext', () => {
     expect(() => readSetupContext()).toThrow('FINITE_STATE_AUTH_TOKEN')
   })
 })
+
+describe('projectName round-trip', () => {
+  beforeEach(() => {
+    vi.mocked(core.exportVariable).mockReset()
+    delete process.env.FINITE_STATE_PROJECT_NAME
+  })
+
+  afterEach(() => {
+    delete process.env.FINITE_STATE_AUTH_TOKEN
+    delete process.env.FINITE_STATE_PROJECT_NAME
+  })
+
+  it('exports the project name when set', () => {
+    writeSetupContext({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      projectName: 'WebGoat',
+    })
+
+    expect(core.exportVariable).toHaveBeenCalledWith('FINITE_STATE_PROJECT_NAME', 'WebGoat')
+  })
+
+  it('reads the project name back without a project ID', () => {
+    process.env.FINITE_STATE_AUTH_TOKEN = 'test-token'
+    process.env.FINITE_STATE_PROJECT_NAME = 'WebGoat'
+
+    const ctx = readSetupContext()
+
+    expect(ctx.projectName).toBe('WebGoat')
+    expect(ctx.projectId).toBeUndefined()
+  })
+})

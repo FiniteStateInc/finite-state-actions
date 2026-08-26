@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { FsClient, isProjectId, resolveProjectId } from '../src/client'
+import { FsClient, ProjectNotFoundError, isProjectId, resolveProjectId } from '../src/client'
 import type { AuthUser, Project, Version, Scan } from '../src/models'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -564,11 +564,12 @@ describe('resolveProjectId', () => {
     expect(result).toBe('p1-uuid-here-0000-000000000000')
   })
 
-  it('throws when no project matches the name', async () => {
+  it('throws ProjectNotFoundError when no project matches the name', async () => {
     const mockFetch = makeFetch([])
     vi.stubGlobal('fetch', mockFetch)
 
     const client = new FsClient({ apiToken: 'tok', domain: 'example.com' })
+    await expect(resolveProjectId(client, 'NonExistent')).rejects.toThrow(ProjectNotFoundError)
     await expect(resolveProjectId(client, 'NonExistent')).rejects.toThrow(
       /No project found with name "NonExistent"/,
     )

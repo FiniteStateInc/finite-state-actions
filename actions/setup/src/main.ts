@@ -1,6 +1,11 @@
 import * as core from '@actions/core'
-import { FsClient, resolveProjectId, writeSetupContext } from '@finite-state/core'
-import { installFsCli } from './install-cli'
+import {
+  FsClient,
+  ProjectNotFoundError,
+  installFsCli,
+  resolveProjectId,
+  writeSetupContext,
+} from '@finite-state/core'
 
 export async function run(): Promise<void> {
   try {
@@ -30,12 +35,24 @@ export async function run(): Promise<void> {
     if (projectIdInput) {
       projectId = projectIdInput
     } else if (projectNameInput) {
-      projectId = await resolveProjectId(client, projectNameInput)
-      core.info(`Resolved project name "${projectNameInput}" → ${projectId}`)
+      try {
+        projectId = await resolveProjectId(client, projectNameInput)
+        core.info(`Resolved project name "${projectNameInput}" → ${projectId}`)
+      } catch (err) {
+        // An unknown name is not fatal: fs-cli creates the project on the next
+        // scan/upload. An ambiguous name still is — we cannot guess which one.
+        if (!(err instanceof ProjectNotFoundError)) {
+          throw err
+        }
+        core.warning(
+          `No existing project named "${projectNameInput}". Continuing without a project ID — ` +
+            `fs-cli will create it on the next scan or upload.`,
+        )
+      }
     }
 
     // ── Export context for downstream actions ────────────────────────────────
-    writeSetupContext({ apiToken, domain, projectId, versionId })
+    writeSetupContext({ apiToken, domain, projectId, projectName: projectNameInput, versionId })
 
     // ── Set outputs ──────────────────────────────────────────────────────────
     core.setOutput('user', authUser.email)

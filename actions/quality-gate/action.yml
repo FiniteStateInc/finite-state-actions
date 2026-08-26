@@ -63,5 +63,5 @@ outputs:
   details-json:
     description: 'JSON array of per-mode gate results'
 runs:
-  using: 'node20'
+  using: 'node24'
   main: 'dist/index.js'

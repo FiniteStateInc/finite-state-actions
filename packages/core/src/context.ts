@@ -5,6 +5,7 @@ const ENV_KEYS = {
   apiToken: 'FINITE_STATE_AUTH_TOKEN',
   domain: 'FINITE_STATE_DOMAIN',
   projectId: 'FINITE_STATE_PROJECT_ID',
+  projectName: 'FINITE_STATE_PROJECT_NAME',
   versionId: 'FINITE_STATE_VERSION_ID',
 } as const
 
@@ -16,6 +17,9 @@ export function writeSetupContext(ctx: SetupContext): void {
   if (ctx.projectId) {
     core.exportVariable(ENV_KEYS.projectId, ctx.projectId)
     core.setOutput('project-id', ctx.projectId)
+  }
+  if (ctx.projectName) {
+    core.exportVariable(ENV_KEYS.projectName, ctx.projectName)
   }
   if (ctx.versionId) {
     core.exportVariable(ENV_KEYS.versionId, ctx.versionId)
@@ -33,7 +37,8 @@ export function readSetupContext(overrides?: Partial<SetupContext>): SetupContex
 
   const domain = overrides?.domain || process.env[ENV_KEYS.domain] || 'app.finitestate.io'
   const projectId = overrides?.projectId || process.env[ENV_KEYS.projectId] || undefined
+  const projectName = overrides?.projectName || process.env[ENV_KEYS.projectName] || undefined
   const versionId = overrides?.versionId || process.env[ENV_KEYS.versionId] || undefined
 
-  return { apiToken, domain, projectId, versionId }
+  return { apiToken, domain, projectId, projectName, versionId }
 }

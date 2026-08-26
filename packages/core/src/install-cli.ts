@@ -2,7 +2,8 @@ import * as core from '@actions/core'
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import type { FsClient } from '@finite-state/core'
+import { constants as fsConstants } from 'node:fs'
+import type { FsClient } from './client'
 
 // ── Platform mapping ──────────────────────────────────────────────────────────
 
@@ -53,4 +54,40 @@ export async function installFsCli(client: FsClient): Promise<string> {
   core.info(`Installed fs-cli (${osName}/${archName}) to ${binary}`)
 
   return binary
+}
+
+/**
+ * Returns the path to `binary` if it is executable on PATH, else undefined.
+ */
+async function findOnPath(binary: string): Promise<string | undefined> {
+  const extensions = process.platform === 'win32' ? ['.exe', '.cmd', ''] : ['']
+
+  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+    if (!dir) continue
+    for (const ext of extensions) {
+      const candidate = path.join(dir, `${binary}${ext}`)
+      try {
+        await fs.access(candidate, fsConstants.X_OK)
+        return candidate
+      } catch {
+        // Not here — keep looking.
+      }
+    }
+  }
+
+  return undefined
+}
+
+/**
+ * Returns a usable fs-cli, installing it only when the runner does not already
+ * have one on PATH (i.e. when the setup action did not run in this job).
+ */
+export async function ensureFsCli(client: FsClient): Promise<string> {
+  const existing = await findOnPath('fs-cli')
+  if (existing) {
+    core.info(`Using fs-cli already on PATH: ${existing}`)
+    return existing
+  }
+
+  return installFsCli(client)
 }

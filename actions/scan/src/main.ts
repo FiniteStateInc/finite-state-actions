@@ -1,6 +1,6 @@
 import * as core from '@actions/core'
 import * as exec from '@actions/exec'
-import { readSetupContext } from '@finite-state/core'
+import { FsClient, ensureFsCli, readSetupContext } from '@finite-state/core'
 
 export async function run(): Promise<void> {
   try {
@@ -8,12 +8,25 @@ export async function run(): Promise<void> {
     const dir = core.getInput('dir') || '.'
     const projectIdOverride = core.getInput('project-id') || undefined
     const version = core.getInput('version', { required: true })
-    const name =
-      core.getInput('name') || process.env.GITHUB_REPOSITORY?.split('/').pop() || undefined
+    const nameInput = core.getInput('name') || core.getInput('project-name') || undefined
+    const apiTokenOverride = core.getInput('api-token') || undefined
+    const domainOverride = core.getInput('domain') || undefined
     const extraArgs = core.getInput('extra-args') || undefined
 
-    // ── Read setup context with overrides ────────────────────────────────────
-    const ctx = readSetupContext({ projectId: projectIdOverride })
+    // ── Read setup context, falling back to this action's own inputs ─────────
+    // Running without the setup action is supported: pass api-token here.
+    const ctx = readSetupContext({
+      apiToken: apiTokenOverride,
+      domain: domainOverride,
+      projectId: projectIdOverride,
+    })
+
+    // Mask the token when it came from this action's input rather than setup.
+    core.setSecret(ctx.apiToken)
+
+    // Prefer an explicit input, then the project name requested via setup, then
+    // the repository name.
+    const name = nameInput || ctx.projectName || process.env.GITHUB_REPOSITORY?.split('/').pop()
 
     if (!name) {
       throw new Error(
@@ -44,9 +57,14 @@ export async function run(): Promise<void> {
       args.push(...extra)
     }
 
+    // ── Ensure fs-cli is available ───────────────────────────────────────────
+    // Installed by setup in the usual chained workflow; downloaded here when
+    // scan runs standalone.
+    const fsCli = await ensureFsCli(new FsClient({ apiToken: ctx.apiToken, domain: ctx.domain }))
+
     // ── Run fs-cli scan ──────────────────────────────────────────────────────
-    core.info(`Scanning ${dir} for project ${ctx.projectId} version ${version}`)
-    const exitCode = await exec.exec('fs-cli', args, {
+    core.info(`Scanning ${dir} for project ${ctx.projectId ?? name} version ${version}`)
+    const exitCode = await exec.exec(fsCli, args, {
       ignoreReturnCode: true,
     })
 

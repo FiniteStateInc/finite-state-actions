@@ -13,17 +13,20 @@ const mockMkdir = vi.fn()
 const mockWriteFile = vi.fn()
 const mockChmod = vi.fn()
 
+const mockAccess = vi.fn()
+
 vi.mock('node:fs/promises', () => ({
   mkdir: (...args: unknown[]) => mockMkdir(...args),
   writeFile: (...args: unknown[]) => mockWriteFile(...args),
   chmod: (...args: unknown[]) => mockChmod(...args),
+  access: (...args: unknown[]) => mockAccess(...args),
 }))
 
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
 
 import * as core from '@actions/core'
-import { installFsCli } from '../src/install-cli'
-import type { FsClient } from '@finite-state/core'
+import { installFsCli, ensureFsCli } from '../src/install-cli'
+import type { FsClient } from '../src/client'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -108,5 +111,52 @@ describe('installFsCli', () => {
 
     await expect(installFsCli(makeClient())).rejects.toThrow(/HTTP 403/)
     expect(core.addPath).not.toHaveBeenCalled()
+  })
+})
+
+describe('ensureFsCli', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    process.env.RUNNER_TEMP = '/runner/temp'
+    process.env.PATH = '/usr/local/bin:/usr/bin'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => BINARY.buffer,
+      }),
+    )
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    delete process.env.RUNNER_TEMP
+  })
+
+  it('reuses an fs-cli already on PATH without downloading', async () => {
+    stubPlatform('linux', 'x64')
+    mockAccess.mockImplementation(async (candidate: string) => {
+      if (candidate !== '/usr/local/bin/fs-cli') throw new Error('ENOENT')
+    })
+    const client = makeClient()
+
+    const binary = await ensureFsCli(client)
+
+    expect(binary).toBe('/usr/local/bin/fs-cli')
+    expect(client.getCliDownloadUrl).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('downloads fs-cli when PATH has none', async () => {
+    stubPlatform('linux', 'x64')
+    mockAccess.mockRejectedValue(new Error('ENOENT'))
+    const client = makeClient()
+
+    const binary = await ensureFsCli(client)
+
+    expect(client.getCliDownloadUrl).toHaveBeenCalledWith('linux', 'amd64')
+    expect(binary).toBe('/runner/temp/fs-cli/fs-cli')
   })
 })

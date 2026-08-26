@@ -31,5 +31,5 @@ outputs:
   version-id:
     description: 'Version ID (echoed or resolved)'
 runs:
-  using: 'node20'
+  using: 'node24'
   main: 'dist/index.js'

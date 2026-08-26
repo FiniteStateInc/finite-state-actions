@@ -252,6 +252,19 @@ export function isProjectId(value: string): boolean {
 }
 
 /**
+ * Thrown when a project name matches no project. Callers that can proceed
+ * without an ID (letting fs-cli create the project) catch this specifically.
+ */
+export class ProjectNotFoundError extends Error {
+  constructor(public readonly projectName: string) {
+    super(
+      `No project found with name "${projectName}". Pass a valid project ID or an exact project name.`,
+    )
+    this.name = 'ProjectNotFoundError'
+  }
+}
+
+/**
  * If `value` is already a UUID, returns it as-is. Otherwise treats it as a
  * project name, queries the API, and returns the matching project ID.
  * Throws when the name matches zero or more than one project.
@@ -264,9 +277,7 @@ export async function resolveProjectId(client: FsClient, value: string): Promise
   const projects = await client.listProjects(value)
 
   if (projects.length === 0) {
-    throw new Error(
-      `No project found with name "${value}". Pass a valid project ID (UUID) or an exact project name.`,
-    )
+    throw new ProjectNotFoundError(value)
   }
 
   if (projects.length > 1) {

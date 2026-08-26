@@ -146,6 +146,12 @@ export interface SetupContext {
   apiToken: string
   domain: string
   projectId?: string
+  /**
+   * Project name requested via setup's project-name input. Set even when the
+   * name could not be resolved to an ID, so downstream fs-cli calls create the
+   * project under the intended name instead of the repository name.
+   */
+  projectName?: string
   versionId?: string
 }
 
