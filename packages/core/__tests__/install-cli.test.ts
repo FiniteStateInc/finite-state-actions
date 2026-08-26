@@ -30,12 +30,52 @@ import type { FsClient } from '../src/client'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const BINARY = new Uint8Array([0x7f, 0x45, 0x4c, 0x46])
+/** Minimal ELF header: magic, then e_machine at 0x12 (0x3e = amd64). */
+function elf(machine = 0x3e): Uint8Array {
+  const b = Buffer.alloc(64)
+  Buffer.from([0x7f, 0x45, 0x4c, 0x46]).copy(b)
+  b.writeUInt16LE(machine, 0x12)
+  return b
+}
 
-function makeClient(downloadUrl = 'https://cdn.example.com/fs-cli?sig=abc') {
+/** Minimal 64-bit little-endian Mach-O: magic, then cputype at 4. */
+function macho(cpu = 0x01000007): Uint8Array {
+  const b = Buffer.alloc(64)
+  b.writeUInt32BE(0xcffaedfe, 0)
+  b.writeUInt32LE(cpu, 4)
+  return b
+}
+
+/** Minimal PE: 'MZ', PE header offset at 0x3c, machine after the signature. */
+function pe(machine = 0x8664): Uint8Array {
+  const b = Buffer.alloc(128)
+  b[0] = 0x4d
+  b[1] = 0x5a
+  b.writeUInt32LE(0x40, 0x3c)
+  Buffer.from([0x50, 0x45, 0x00, 0x00]).copy(b, 0x40)
+  b.writeUInt16LE(machine, 0x44)
+  return b
+}
+
+const BINARY = elf()
+
+function makeClient(downloadUrl = 'https://cdn.example.com/fs-cli?sig=abc', version = 'v2.3.30') {
   return {
-    getCliDownloadUrl: vi.fn().mockResolvedValue({ download_url: downloadUrl }),
+    getCliDownloadUrl: vi.fn().mockResolvedValue({ download_url: downloadUrl, version }),
   } as unknown as FsClient & { getCliDownloadUrl: ReturnType<typeof vi.fn> }
+}
+
+/** Points the stubbed fetch at a specific payload. */
+function serve(bytes: Uint8Array): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () =>
+        bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length),
+    }),
+  )
 }
 
 function stubPlatform(platform: string, arch: string) {
@@ -49,14 +89,7 @@ describe('installFsCli', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     process.env.RUNNER_TEMP = '/runner/temp'
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        arrayBuffer: async () => BINARY.buffer,
-      }),
-    )
+    serve(BINARY)
   })
 
   afterEach(() => {
@@ -82,6 +115,7 @@ describe('installFsCli', () => {
 
   it('maps darwin/arm64 runners to the platform naming', async () => {
     stubPlatform('darwin', 'arm64')
+    serve(macho(0x0100000c))
     const client = makeClient()
 
     await installFsCli(client)
@@ -91,12 +125,57 @@ describe('installFsCli', () => {
 
   it('uses the .exe suffix on Windows runners', async () => {
     stubPlatform('win32', 'x64')
+    serve(pe())
     const client = makeClient()
 
     const binary = await installFsCli(client)
 
     expect(client.getCliDownloadUrl).toHaveBeenCalledWith('windows', 'amd64')
     expect(binary.endsWith('fs-cli.exe')).toBe(true)
+  })
+
+  it('logs the version and platform it is installing', async () => {
+    stubPlatform('linux', 'x64')
+    const client = makeClient('https://cdn.example.com/fs-cli', 'v2.3.30')
+
+    await installFsCli(client)
+
+    expect(core.info).toHaveBeenCalledWith(expect.stringContaining('v2.3.30'))
+    expect(core.info).toHaveBeenCalledWith(expect.stringContaining('linux/amd64'))
+  })
+
+  it('rejects a binary built for another operating system', async () => {
+    stubPlatform('linux', 'x64')
+    serve(pe())
+
+    await expect(installFsCli(makeClient())).rejects.toThrow(/is a windows binary/)
+    expect(mockWriteFile).not.toHaveBeenCalled()
+    expect(core.addPath).not.toHaveBeenCalled()
+  })
+
+  it('rejects a binary built for another architecture', async () => {
+    stubPlatform('linux', 'x64')
+    serve(elf(0xb7))
+
+    await expect(installFsCli(makeClient())).rejects.toThrow(/built for arm64/)
+    expect(mockWriteFile).not.toHaveBeenCalled()
+  })
+
+  it('rejects an error page served in place of the binary', async () => {
+    stubPlatform('linux', 'x64')
+    serve(new TextEncoder().encode('{"error":"no release for this platform"}'))
+
+    await expect(installFsCli(makeClient())).rejects.toThrow(/looks like JSON/)
+    expect(mockWriteFile).not.toHaveBeenCalled()
+  })
+
+  it('accepts a universal macOS binary, which pins no single architecture', async () => {
+    stubPlatform('darwin', 'arm64')
+    const fat = Buffer.alloc(64)
+    fat.writeUInt32BE(0xcafebabe, 0)
+    serve(fat)
+
+    await expect(installFsCli(makeClient())).resolves.toContain('fs-cli')
   })
 
   it('throws on an unsupported platform', async () => {
@@ -119,14 +198,7 @@ describe('ensureFsCli', () => {
     vi.clearAllMocks()
     process.env.RUNNER_TEMP = '/runner/temp'
     process.env.PATH = '/usr/local/bin:/usr/bin'
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        arrayBuffer: async () => BINARY.buffer,
-      }),
-    )
+    serve(BINARY)
   })
 
   afterEach(() => {

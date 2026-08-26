@@ -53,7 +53,10 @@ Establishes authentication and configuration context for all downstream actions 
 
 - The runner needs no `jq`, `sudo`, or write access to `/usr/local/bin` — everything happens under `RUNNER_TEMP`.
 - The download is token-authenticated, so an expired or scope-limited token fails here rather than at scan time.
-- `os` maps from the runner as `linux`, `darwin`, or `windows`; `arch` maps to `amd64` (x64) or `arm64`. Any other platform fails fast.
+- `os` maps from the runner as `linux`, `darwin` (macOS), or `windows`; `arch` maps to `amd64` (Node's `x64`) or `arm64`. Any other platform or architecture fails fast, naming the runner values that were rejected.
+- The bytes are verified against the runner before anything is written: the executable header (ELF `e_machine`, Mach-O `cputype`, PE `Machine`) must agree with the requested os/arch, so a Linux build on a Windows runner — or a JSON/HTML error page served in place of the binary — fails with a clear message instead of a cryptic exec error later. A universal Mach-O is accepted, since it pins no single architecture.
+- Windows installs as `fs-cli.exe`; `ensureFsCli` also looks for `.exe`/`.cmd` when reusing an fs-cli already on `PATH`.
+- The endpoint returns the release `version` alongside the URL, and it is logged — check the step log to see which fs-cli a run actually used. SHA-256 and signature metadata live on the separate scanner update-check endpoint; the install path does not verify them today.
 - `PATH` is exported for subsequent steps in the same job only — a later job must run `setup` again.
 - v1 installed fs-cli by piping a `customer-resources` install script to `sh`; that path is gone in v2.
 
