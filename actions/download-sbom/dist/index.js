@@ -78292,13 +78292,22 @@ function assertBinaryMatchesRunner(bytes, osName, archName) {
  * The download URL returned by the API is pre-signed, so the binary itself is
  * fetched without the auth header.
  */
-async function installFsCli(client) {
+/**
+ * Maps the current runner to the platform's os/arch vocabulary, or throws when
+ * no fs-cli build exists for it. Both entry points resolve this first, so an
+ * unsupported runner can never fall through to reusing whatever is on PATH.
+ */
+function resolveRunnerTarget() {
     const osName = OS_NAMES[process.platform];
     const archName = ARCH_NAMES[process.arch];
     if (!osName || !archName) {
         throw new Error(`fs-cli is not available for this runner (${process.platform}/${process.arch}). ` +
             `Supported: linux, darwin (macOS), and windows on amd64 (x64) or arm64.`);
     }
+    return { osName, archName };
+}
+async function installFsCli(client) {
+    const { osName, archName } = resolveRunnerTarget();
     const download = await client.getCliDownloadUrl(osName, archName);
     const { download_url: downloadUrl, version } = download;
     if (!downloadUrl) {
@@ -78364,12 +78373,15 @@ async function findOnPath(binary) {
  * have one on PATH (i.e. when the setup action did not run in this job).
  */
 async function ensureFsCli(client) {
+    // Resolved before anything else: an unsupported runner has no usable fs-cli,
+    // so it must fail here rather than reuse whatever is named fs-cli on PATH.
+    const { osName, archName } = resolveRunnerTarget();
     const existing = await findOnPath('fs-cli');
     if (existing) {
         // An fs-cli on PATH is normally the one `setup` installed, but it can also
         // be a stale or foreign binary — check it against this runner rather than
         // trusting the name, and download a correct one when it does not match.
-        const reason = await inspectExistingFsCli(existing);
+        const reason = await inspectExistingFsCli(existing, osName, archName);
         if (!reason) {
             core.info(`Using fs-cli already on PATH: ${existing}`);
             return existing;
@@ -78383,13 +78395,7 @@ async function ensureFsCli(client) {
  * it looks right. An unreadable file is reported rather than thrown, so a bad
  * PATH entry falls back to a download instead of failing the step.
  */
-async function inspectExistingFsCli(file) {
-    const osName = OS_NAMES[process.platform];
-    const archName = ARCH_NAMES[process.arch];
-    if (!osName || !archName) {
-        // installFsCli reports the unsupported runner with a better message.
-        return undefined;
-    }
+async function inspectExistingFsCli(file, osName, archName) {
     try {
         return binaryMismatchReason(await readHeader(file), osName, archName);
     }

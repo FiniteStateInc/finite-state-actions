@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // ── Mock @actions/exec ─────────────────────────────────────────────────────────
 
@@ -116,6 +116,14 @@ describe('upload action', () => {
     })
 
     mockEnsureFsCli.mockResolvedValue('/usr/local/bin/fs-cli')
+
+    // Present on every GitHub runner; fs-cli requires --name, and this is the
+    // fallback when no project name was given.
+    process.env.GITHUB_REPOSITORY = 'FiniteStateInc/finite-state-actions'
+  })
+
+  afterEach(() => {
+    delete process.env.GITHUB_REPOSITORY
   })
 
   it('uploads through fs-cli and reports the version it created', async () => {
@@ -223,19 +231,36 @@ describe('upload action', () => {
     },
   )
 
-  it('warns when timeout is below fs-cli one-minute granularity', async () => {
+  it.each([
+    ['30', '1'],
+    ['90', '2'],
+  ])('warns that timeout %ss rounds up to %s minute(s)', async (timeout, minutes) => {
     setInputs({
       type: 'sca',
       file: '/tmp/results.json',
       version: 'v1.2.3',
-      timeout: '30',
+      timeout,
     })
     runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE })
 
     await run()
 
-    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('below the one-minute'))
-    expect(execCalls[0].args).toEqual(expect.arrayContaining(['--timeout', '1']))
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('rounding up'))
+    expect(execCalls[0].args).toEqual(expect.arrayContaining(['--timeout', minutes]))
+  })
+
+  it('does not warn when timeout is a whole number of minutes', async () => {
+    setInputs({
+      type: 'sca',
+      file: '/tmp/results.json',
+      version: 'v1.2.3',
+      timeout: '600',
+    })
+    runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE })
+
+    await run()
+
+    expect(core.warning).not.toHaveBeenCalled()
   })
 
   it('rejects an empty type list', async () => {
@@ -290,7 +315,7 @@ describe('upload action', () => {
     await run()
 
     expect(core.setOutput).toHaveBeenCalledWith('scan-status', 'COMPLETED')
-    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('could not be parsed'))
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('could not be read'))
     expect(core.setFailed).not.toHaveBeenCalled()
   })
 
@@ -309,7 +334,83 @@ describe('upload action', () => {
     expect(args).toEqual(expect.arrayContaining(['--name', 'webgoat', '--project-id', '42']))
     // the repository name stands in for the missing project name; the ID never does
     expect(args[args.indexOf('--name') + 1]).not.toBe('42')
+  })
+
+  it('fails when no project name can be derived', async () => {
     delete process.env.GITHUB_REPOSITORY
+    setInputs({
+      type: 'sca',
+      file: '/tmp/app.jar',
+      version: 'v1.2.3',
+    })
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(
+      expect.stringContaining('A project name is required'),
+    )
+    expect(execCalls).toHaveLength(0)
+  })
+
+  it('fails when query exits 0 but reports a non-completed rollup', async () => {
+    setInputs({
+      type: 'sca',
+      file: '/tmp/results.json',
+      version: 'v1.2.3',
+      'wait-for-completion': 'true',
+    })
+    runQueue.push(
+      { exitCode: 0, stdout: UPLOAD_LINE },
+      { exitCode: 0, stdout: scanJson({ total: 2, completed: 1, failed: 0 }) },
+    )
+
+    await run()
+
+    expect(core.setOutput).toHaveBeenCalledWith('scan-status', 'RUNNING')
+    expect(core.setFailed).toHaveBeenCalledWith(
+      expect.stringContaining('Refusing to report success'),
+    )
+  })
+
+  it('treats a rollup with non-numeric counts as unreadable', async () => {
+    setInputs({
+      type: 'sca',
+      file: '/tmp/results.json',
+      version: 'v1.2.3',
+      'wait-for-completion': 'true',
+    })
+    runQueue.push(
+      { exitCode: 0, stdout: UPLOAD_LINE },
+      {
+        exitCode: 0,
+        stdout: JSON.stringify({ projectVersionId: 'ver-999', found: true, tests: {} }),
+      },
+    )
+
+    await run()
+
+    expect(core.setOutput).toHaveBeenCalledWith('scan-status', 'COMPLETED')
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('could not be read'))
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('ignores braces in log lines when reading the query JSON', async () => {
+    setInputs({
+      type: 'sca',
+      file: '/tmp/results.json',
+      version: 'v1.2.3',
+      'wait-for-completion': 'true',
+    })
+    const noise = 'level=INFO msg="scan {pending} for {version}"\n'
+    runQueue.push(
+      { exitCode: 0, stdout: UPLOAD_LINE },
+      { exitCode: 0, stdout: noise + scanJson({ total: 1, completed: 1, failed: 0 }) + '\n' },
+    )
+
+    await run()
+
+    expect(core.setOutput).toHaveBeenCalledWith('scan-status', 'COMPLETED')
+    expect(core.setFailed).not.toHaveBeenCalled()
   })
 
   it('fails the step when fs-cli query reports a failed scan', async () => {

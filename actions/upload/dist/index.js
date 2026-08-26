@@ -26510,13 +26510,22 @@ function assertBinaryMatchesRunner(bytes, osName, archName) {
  * The download URL returned by the API is pre-signed, so the binary itself is
  * fetched without the auth header.
  */
-async function installFsCli(client) {
+/**
+ * Maps the current runner to the platform's os/arch vocabulary, or throws when
+ * no fs-cli build exists for it. Both entry points resolve this first, so an
+ * unsupported runner can never fall through to reusing whatever is on PATH.
+ */
+function resolveRunnerTarget() {
     const osName = OS_NAMES[process.platform];
     const archName = ARCH_NAMES[process.arch];
     if (!osName || !archName) {
         throw new Error(`fs-cli is not available for this runner (${process.platform}/${process.arch}). ` +
             `Supported: linux, darwin (macOS), and windows on amd64 (x64) or arm64.`);
     }
+    return { osName, archName };
+}
+async function installFsCli(client) {
+    const { osName, archName } = resolveRunnerTarget();
     const download = await client.getCliDownloadUrl(osName, archName);
     const { download_url: downloadUrl, version } = download;
     if (!downloadUrl) {
@@ -26582,12 +26591,15 @@ async function findOnPath(binary) {
  * have one on PATH (i.e. when the setup action did not run in this job).
  */
 async function ensureFsCli(client) {
+    // Resolved before anything else: an unsupported runner has no usable fs-cli,
+    // so it must fail here rather than reuse whatever is named fs-cli on PATH.
+    const { osName, archName } = resolveRunnerTarget();
     const existing = await findOnPath('fs-cli');
     if (existing) {
         // An fs-cli on PATH is normally the one `setup` installed, but it can also
         // be a stale or foreign binary — check it against this runner rather than
         // trusting the name, and download a correct one when it does not match.
-        const reason = await inspectExistingFsCli(existing);
+        const reason = await inspectExistingFsCli(existing, osName, archName);
         if (!reason) {
             core.info(`Using fs-cli already on PATH: ${existing}`);
             return existing;
@@ -26601,13 +26613,7 @@ async function ensureFsCli(client) {
  * it looks right. An unreadable file is reported rather than thrown, so a bad
  * PATH entry falls back to a download instead of failing the step.
  */
-async function inspectExistingFsCli(file) {
-    const osName = OS_NAMES[process.platform];
-    const archName = ARCH_NAMES[process.arch];
-    if (!osName || !archName) {
-        // installFsCli reports the unsupported runner with a better message.
-        return undefined;
-    }
+async function inspectExistingFsCli(file, osName, archName) {
     try {
         return binaryMismatchReason(await readHeader(file), osName, archName);
     }
@@ -26951,33 +26957,89 @@ function parseUploadIds(stdout) {
     const match = /project=(\S+)\s+version=(\S+)/.exec(stdout);
     return match ? { projectId: match[1], versionId: match[2] } : {};
 }
-/** Extracts the JSON object from output that may carry log lines around it. */
+/**
+ * Extracts a JSON object from output that may carry log lines around it.
+ *
+ * Each `{` is tried as a start and the matching close brace is found by
+ * counting depth (string literals and escapes skipped), so a brace inside a log
+ * line cannot splice two fragments into a parseable but wrong object.
+ */
 function parseJsonBlock(stdout) {
-    const start = stdout.indexOf('{');
-    const end = stdout.lastIndexOf('}');
-    if (start === -1 || end <= start) {
-        return undefined;
+    for (let start = stdout.indexOf('{'); start !== -1; start = stdout.indexOf('{', start + 1)) {
+        const end = findObjectEnd(stdout, start);
+        if (end === -1) {
+            continue;
+        }
+        try {
+            return JSON.parse(stdout.slice(start, end + 1));
+        }
+        catch {
+            // Not a JSON object after all — try the next candidate start.
+        }
     }
-    try {
-        return JSON.parse(stdout.slice(start, end + 1));
+    return undefined;
+}
+/** Index of the `}` closing the object that opens at `start`, or -1. */
+function findObjectEnd(text, start) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < text.length; i++) {
+        const char = text[i];
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+            }
+            else if (char === '\\') {
+                escaped = true;
+            }
+            else if (char === '"') {
+                inString = false;
+            }
+            continue;
+        }
+        if (char === '"') {
+            inString = true;
+        }
+        else if (char === '{') {
+            depth++;
+        }
+        else if (char === '}') {
+            depth--;
+            if (depth === 0) {
+                return i;
+            }
+        }
     }
-    catch {
-        return undefined;
-    }
+    return -1;
 }
 /**
  * Rolls the per-type scan summary up into one status for the `scan-status`
  * output.
  */
 function summarizeStatus(result) {
-    const tests = result?.tests;
-    if (!result?.found || !tests || tests.totalTests === 0) {
+    // No result at all means the output was unreadable, which is not the same as
+    // the platform reporting no scans.
+    if (!result) {
+        return undefined;
+    }
+    if (!result.found || !result.tests) {
         return 'NOT_FOUND';
     }
-    if (tests.failedTests > 0) {
+    const tests = result.tests;
+    const { totalTests, completedTests, failedTests } = tests;
+    // Counts that are absent or not numbers make the rollup unusable — say so
+    // rather than letting NaN comparisons fall through to a confident RUNNING.
+    if (![totalTests, completedTests, failedTests].every((n) => Number.isFinite(n))) {
+        return undefined;
+    }
+    if (totalTests === 0) {
+        return 'NOT_FOUND';
+    }
+    if (failedTests > 0) {
         return 'FAILED';
     }
-    return tests.completedTests + tests.failedTests >= tests.totalTests ? 'COMPLETED' : 'RUNNING';
+    return completedTests + failedTests >= totalTests ? 'COMPLETED' : 'RUNNING';
 }
 /**
  * Builds the fs-cli argument list for the requested scan types. Binary types
@@ -27052,12 +27114,14 @@ async function run() {
         if (timeoutSecs !== undefined && timeoutSecs <= 0) {
             throw new Error(`timeout must be a positive number of seconds, got "${timeoutInput}".`);
         }
-        // fs-cli takes whole minutes, so a sub-minute request rounds up to one —
-        // warn rather than silently waiting longer than asked.
-        if (timeoutSecs !== undefined && timeoutSecs < 60) {
-            core.warning(`timeout ${timeoutSecs}s is below the one-minute granularity fs-cli accepts; using 1 minute.`);
-        }
         const timeoutMinutes = timeoutSecs ? Math.max(1, Math.ceil(timeoutSecs / 60)) : undefined;
+        // fs-cli takes whole minutes, so any timeout that is not an exact multiple
+        // of 60 rounds up — warn with the bound that will actually apply rather
+        // than waiting longer than asked without saying so.
+        if (timeoutSecs !== undefined && timeoutMinutes !== undefined && timeoutSecs % 60 !== 0) {
+            core.warning(`timeout ${timeoutSecs}s is not a whole number of minutes, which is all fs-cli accepts; ` +
+                `rounding up to ${timeoutMinutes} minute(s).`);
+        }
         if (core.getInput('project-type')) {
             core.warning('project-type is ignored: fs-cli creates the project, and the platform picks the type.');
         }
@@ -27085,15 +27149,21 @@ async function run() {
         const endpoint = `https://${ctx.domain}`;
         // fs-cli requires --name even when --project-id makes it redundant for
         // resolution (config.go: `if c.Name == "" { return "--name is required" }`),
-        // so fall back to the repository name the way the scan action does. Never
-        // pass the project ID here: if a future fs-cli stops ignoring --name under
-        // --project-id, it would find-or-create a project literally named after the
-        // ID.
-        const name = projectName || process.env.GITHUB_REPOSITORY?.split('/').pop() || ctx.projectId;
+        // so fall back to the repository name the way the scan action does. The
+        // project ID is never used here: if a future fs-cli stops ignoring --name
+        // under --project-id, it would find-or-create a project literally named
+        // after the ID.
+        const name = projectName || process.env.GITHUB_REPOSITORY?.split('/').pop();
+        if (!name) {
+            throw new Error('A project name is required: fs-cli needs --name even when project-id is set. ' +
+                'Provide project-name, run finite-state/setup with project-name, or ensure ' +
+                'GITHUB_REPOSITORY is available.');
+        }
         const locator = [
             '--endpoint',
             endpoint,
-            ...(name ? ['--name', name] : []),
+            '--name',
+            name,
             ...(versionName ? ['--version', versionName] : []),
             ...(ctx.projectId ? ['--project-id', ctx.projectId] : []),
             ...(versionIdInput ? ['--version-id', versionIdInput] : []),
@@ -27144,22 +27214,30 @@ async function run() {
             '--fail-on-scan-incomplete',
         ], ctx.apiToken);
         const result = parseJsonBlock(query.stdout);
+        const rollup = summarizeStatus(result);
         if (query.exitCode !== 0) {
             // fs-cli already printed why (scans failed, still running, or none
             // found); surface it as a step failure, as the API polling path did.
-            const status = summarizeStatus(result);
+            const status = rollup ?? 'UNKNOWN';
             core.setOutput('scan-status', status);
             throw new Error(`fs-cli query reported scan status ${status} (exit code ${query.exitCode}) for version ${projectVersionId}.`);
         }
         // Exit 0 under --fail-on-scan-incomplete means every scan for the version
-        // settled successfully, so the exit code — not the parsed detail — is what
-        // decides the outcome. Unreadable output must not read as NOT_FOUND.
-        if (!result) {
-            core.warning('fs-cli query exited 0 but its JSON output could not be parsed; reporting COMPLETED ' +
-                'from the exit code.');
+        // settled successfully, so the exit code decides the outcome. Output we
+        // could not read must not report as NOT_FOUND.
+        if (rollup === undefined) {
+            core.warning('fs-cli query exited 0 but its output could not be read; reporting COMPLETED from the ' +
+                'exit code.');
         }
-        const status = result ? summarizeStatus(result) : 'COMPLETED';
+        const status = rollup ?? 'COMPLETED';
         core.setOutput('scan-status', status);
+        // A clean exit that disagrees with its own rollup means one of the two is
+        // wrong; failing is the only safe reading, since passing would publish
+        // FAILED or RUNNING from a green step.
+        if (rollup !== undefined && rollup !== 'COMPLETED') {
+            throw new Error(`fs-cli query exited 0 but reported scan status ${rollup} for version ` +
+                `${projectVersionId}. Refusing to report success.`);
+        }
         core.info(`Scan completed with status: ${status}`);
     }
     catch (err) {
