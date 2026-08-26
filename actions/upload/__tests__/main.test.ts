@@ -206,20 +206,110 @@ describe('upload action', () => {
     expect(core.setFailed).not.toHaveBeenCalled()
   })
 
-  it('rejects a non-numeric timeout', async () => {
+  it.each(['ten minutes', '600s', '10 minutes', '-5'])(
+    'rejects the malformed timeout %j',
+    async (timeout) => {
+      setInputs({
+        type: 'sca',
+        file: '/tmp/results.json',
+        version: 'v1.2.3',
+        timeout,
+      })
+
+      await run()
+
+      expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('timeout must be a'))
+      expect(execCalls).toHaveLength(0)
+    },
+  )
+
+  it('warns when timeout is below fs-cli one-minute granularity', async () => {
     setInputs({
       type: 'sca',
       file: '/tmp/results.json',
       version: 'v1.2.3',
-      timeout: 'ten minutes',
+      timeout: '30',
+    })
+    runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE })
+
+    await run()
+
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('below the one-minute'))
+    expect(execCalls[0].args).toEqual(expect.arrayContaining(['--timeout', '1']))
+  })
+
+  it('rejects an empty type list', async () => {
+    setInputs({
+      type: ' , ',
+      file: '/tmp/results.json',
+      version: 'v1.2.3',
     })
 
     await run()
 
-    expect(core.setFailed).toHaveBeenCalledWith(
-      expect.stringContaining('timeout must be a positive number of seconds'),
-    )
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('type is empty'))
     expect(execCalls).toHaveLength(0)
+  })
+
+  it('rejects an unrecognized sbom-format', async () => {
+    setInputs({
+      type: 'sbom',
+      'sbom-format': 'swid',
+      file: 'sbom.json',
+      version: 'v1.2.3',
+    })
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('is not recognized'))
+    expect(execCalls).toHaveLength(0)
+  })
+
+  it('lets fs-cli detect the SBOM format when sbom-format is unset', async () => {
+    setInputs({
+      type: 'sbom',
+      file: 'sbom.json',
+      version: 'v1.2.3',
+    })
+    runQueue.push({ exitCode: 0, stdout: 'Imported SBOM: project=proj-1 version=ver-999\n' })
+
+    await run()
+
+    expect(execCalls[0].args).not.toContain('--format')
+  })
+
+  it('reports COMPLETED from the exit code when query output is unparseable', async () => {
+    setInputs({
+      type: 'sca',
+      file: '/tmp/results.json',
+      version: 'v1.2.3',
+      'wait-for-completion': 'true',
+    })
+    runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE }, { exitCode: 0, stdout: 'no json here' })
+
+    await run()
+
+    expect(core.setOutput).toHaveBeenCalledWith('scan-status', 'COMPLETED')
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('could not be parsed'))
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('never passes a project ID through --name', async () => {
+    process.env.GITHUB_REPOSITORY = 'FiniteStateInc/webgoat'
+    setInputs({
+      type: 'sca',
+      file: '/tmp/app.jar',
+      version: 'v1.2.3',
+    })
+    runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE })
+
+    await run()
+
+    const args = execCalls[0].args
+    expect(args).toEqual(expect.arrayContaining(['--name', 'webgoat', '--project-id', '42']))
+    // the repository name stands in for the missing project name; the ID never does
+    expect(args[args.indexOf('--name') + 1]).not.toBe('42')
+    delete process.env.GITHUB_REPOSITORY
   })
 
   it('fails the step when fs-cli query reports a failed scan', async () => {

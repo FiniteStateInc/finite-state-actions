@@ -30,9 +30,15 @@ export async function run(): Promise<void> {
       await installFsCli(client)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      // Only an auth-shaped failure points at the token; a wrong runner
+      // platform or a corrupt download must not be reported as a credential
+      // problem.
+      const looksLikeAuth = /\b(401|403|Unauthorized|Forbidden|token)\b/i.test(message)
       throw new Error(
-        `Could not install fs-cli from ${domain}: ${message} — check that api-token is valid ` +
-          `for ${domain}, which must be the tenant the token was issued from.`,
+        looksLikeAuth
+          ? `Could not install fs-cli from ${domain}: ${message} — check that api-token is valid ` +
+              `for ${domain}, which must be the tenant the token was issued from.`
+          : `Could not install fs-cli from ${domain}: ${message}`,
       )
     }
 

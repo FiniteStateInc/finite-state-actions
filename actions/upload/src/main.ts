@@ -9,6 +9,31 @@ import type { SbomFormat } from '@finite-state/core'
 /** Types fs-cli's `upload` subcommand handles, in its own naming. */
 const BINARY_TYPES = new Set(['sca', 'sast', 'config', 'vulnerability_analysis'])
 
+/** SBOM formats fs-cli accepts, keyed by the aliases this action documents. */
+const SBOM_FORMATS: Record<string, string> = {
+  cdx: 'cyclonedx',
+  cyclonedx: 'cyclonedx',
+  spdx: 'spdx',
+}
+
+/**
+ * Maps the `sbom-format` input to fs-cli's `--format`, or to nothing at all when
+ * it was not set — fs-cli then detects the format from the file's contents.
+ */
+function sbomFormatArgs(sbomFormat?: SbomFormat): string[] {
+  if (!sbomFormat) {
+    return []
+  }
+  const format = SBOM_FORMATS[sbomFormat.trim().toLowerCase()]
+  if (!format) {
+    throw new Error(
+      `sbom-format "${sbomFormat}" is not recognized. Valid: cdx (cyclonedx) or spdx. ` +
+        `Leave it unset to let fs-cli detect the format.`,
+    )
+  }
+  return ['--format', format]
+}
+
 /** Our inputs use hyphens; fs-cli uses underscores. */
 function normalizeType(type: string): string {
   return type.trim().replace(/-/g, '_')
@@ -140,6 +165,13 @@ function buildFsCliArgs(opts: {
   // Omitted when the caller set no timeout, leaving fs-cli its own default.
   const timeout = opts.timeoutMinutes ? ['--timeout', String(opts.timeoutMinutes)] : []
 
+  if (types.length === 0) {
+    throw new Error(
+      'type is empty. Provide at least one of: sca, sast, config, vulnerability-analysis, ' +
+        'sbom, third-party.',
+    )
+  }
+
   const binary = types.filter((t) => BINARY_TYPES.has(t))
   const special = types.filter((t) => !BINARY_TYPES.has(t))
 
@@ -157,9 +189,10 @@ function buildFsCliArgs(opts: {
   if (special.length === 1) {
     const type = special[0]
     if (type === 'sbom') {
-      const format = opts.sbomFormat === 'spdx' ? 'spdx' : 'cyclonedx'
-      // `import` has no --timeout of its own.
-      return ['import', file, ...locator, '--format', format]
+      // fs-cli auto-detects the format from the file when --format is omitted,
+      // so only pass it when the caller actually asked for one. `import` has no
+      // --timeout of its own.
+      return ['import', file, ...locator, ...sbomFormatArgs(opts.sbomFormat)]
     }
     if (type === 'third_party') {
       if (!opts.scannerType) {
@@ -198,10 +231,25 @@ export async function run(): Promise<void> {
 
     // timeout is optional: unset means fs-cli's own defaults (30 minutes for
     // the upload, 30 for the scan poll) rather than a bound we invented.
-    const timeoutInput = core.getInput('timeout')
+    const timeoutInput = core.getInput('timeout').trim()
+    // Deliberately strict: parseInt would read "600s" as 600 and "10 minutes"
+    // as 10, quietly applying a bound the caller did not ask for.
+    if (timeoutInput && !/^\d+$/.test(timeoutInput)) {
+      throw new Error(
+        `timeout must be a whole number of seconds, got "${timeoutInput}". ` +
+          `Leave it unset to use fs-cli's own defaults.`,
+      )
+    }
     const timeoutSecs = timeoutInput ? parseInt(timeoutInput, 10) : undefined
-    if (timeoutSecs !== undefined && (Number.isNaN(timeoutSecs) || timeoutSecs <= 0)) {
+    if (timeoutSecs !== undefined && timeoutSecs <= 0) {
       throw new Error(`timeout must be a positive number of seconds, got "${timeoutInput}".`)
+    }
+    // fs-cli takes whole minutes, so a sub-minute request rounds up to one —
+    // warn rather than silently waiting longer than asked.
+    if (timeoutSecs !== undefined && timeoutSecs < 60) {
+      core.warning(
+        `timeout ${timeoutSecs}s is below the one-minute granularity fs-cli accepts; using 1 minute.`,
+      )
     }
     const timeoutMinutes = timeoutSecs ? Math.max(1, Math.ceil(timeoutSecs / 60)) : undefined
 
@@ -241,7 +289,13 @@ export async function run(): Promise<void> {
     // even alongside --project-id because fs-cli validates it before deciding
     // the ID makes it redundant.
     const endpoint = `https://${ctx.domain}`
-    const name = projectName || ctx.projectId
+    // fs-cli requires --name even when --project-id makes it redundant for
+    // resolution (config.go: `if c.Name == "" { return "--name is required" }`),
+    // so fall back to the repository name the way the scan action does. Never
+    // pass the project ID here: if a future fs-cli stops ignoring --name under
+    // --project-id, it would find-or-create a project literally named after the
+    // ID.
+    const name = projectName || process.env.GITHUB_REPOSITORY?.split('/').pop() || ctx.projectId
     const locator = [
       '--endpoint',
       endpoint,
@@ -310,16 +364,29 @@ export async function run(): Promise<void> {
       ctx.apiToken,
     )
 
-    const status = summarizeStatus(parseJsonBlock<ScanQueryResult>(query.stdout))
-    core.setOutput('scan-status', status)
+    const result = parseJsonBlock<ScanQueryResult>(query.stdout)
 
     if (query.exitCode !== 0) {
       // fs-cli already printed why (scans failed, still running, or none
       // found); surface it as a step failure, as the API polling path did.
+      const status = summarizeStatus(result)
+      core.setOutput('scan-status', status)
       throw new Error(
         `fs-cli query reported scan status ${status} (exit code ${query.exitCode}) for version ${projectVersionId}.`,
       )
     }
+
+    // Exit 0 under --fail-on-scan-incomplete means every scan for the version
+    // settled successfully, so the exit code — not the parsed detail — is what
+    // decides the outcome. Unreadable output must not read as NOT_FOUND.
+    if (!result) {
+      core.warning(
+        'fs-cli query exited 0 but its JSON output could not be parsed; reporting COMPLETED ' +
+          'from the exit code.',
+      )
+    }
+    const status = result ? summarizeStatus(result) : 'COMPLETED'
+    core.setOutput('scan-status', status)
 
     core.info(`Scan completed with status: ${status}`)
   } catch (err) {
