@@ -156,9 +156,16 @@ Uploads a binary, SBOM, or third-party scan results for analysis. Handles all up
 
 | Output        | Description                                 |
 | ------------- | ------------------------------------------- |
-| `scan-id`     | The created scan ID                         |
+| `scan-id`     | ID of the first created scan                |
+| `scan-ids`    | Comma-separated IDs of every created scan   |
 | `version-id`  | The version ID (created or existing)        |
 | `scan-status` | Final scan status (`COMPLETED` or `FAILED`) |
+
+**Standalone use (v2.1 and later):** like `scan`, `upload` accepts `api-token`, `domain`, and `project-name` directly, so `setup` is optional. If no project matches `project-name`, it is created via `POST /projects` using `project-type` (default `firmware`).
+
+**Multiple types:** `type` accepts a comma-separated list (`sca,sast,config,vulnerability-analysis`). The same file is uploaded once per type against one version. `scan-id` is the first scan; `scan-ids` lists all of them.
+
+**Globs:** `file` may be a glob, but it must match exactly one file — `target/*.jar` in a Maven build also matches `-sources.jar` and `-javadoc.jar`, so an ambiguous match fails with the list rather than uploading the wrong artifact.
 
 **Behavior:** Resolves project/version from inputs or setup context. If `version` name is provided, creates a new version via `POST /projects/{id}/versions`. Routes to the correct upload endpoint based on `type`. When `wait-for-completion` is true, polls `GET /scans?filter=projectVersion=={pvId}` until complete or timed out.
 
@@ -796,16 +803,18 @@ jobs:
 
 ### Source scan (fs-cli)
 
-| Symptom                                            | Cause                                                     | Fix                                                                           |
-| -------------------------------------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `FINITE_STATE_AUTH_TOKEN is not set`               | Neither `setup` ran nor `api-token` was passed to `scan`  | Add `finite-state/setup`, or pass `api-token` directly to `scan`              |
-| `setup` fails with "not available for this runner" | Unsupported runner OS/arch for the fs-cli download        | Use a linux/darwin/windows runner on amd64 or arm64                           |
-| `setup` fails downloading fs-cli with HTTP 403     | Pre-signed download URL expired or the token was rejected | Re-run the job; if it persists, regenerate the API token                      |
-| `scan` fails with "name is required"               | Empty `name` input and no `GITHUB_REPOSITORY`             | Set the `name` input explicitly                                               |
-| Results land in an unexpected/new project          | `name` defaulted to the repo name and created a match     | Pin `project-id` on `setup`, or set `name` to the exact platform project name |
-| `fs-cli` rejects `--project-id`                    | A project name was passed where an ID is expected         | Use `project-name` instead, and leave `project-id` unset                      |
-| Argument in `extra-args` arrives split or garbled  | `extra-args` is whitespace-split, no quoting support      | Avoid values containing spaces; use a config file for those                   |
-| Job fails but you wanted the raw exit code         | Non-zero `fs-cli` exit calls `setFailed`                  | Set `continue-on-error: true` and read `steps.<id>.outputs.exit-code`         |
+| Symptom                                            | Cause                                                     | Fix                                                                                         |
+| -------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `FINITE_STATE_AUTH_TOKEN is not set`               | Neither `setup` ran nor `api-token` was passed to `scan`  | Add `finite-state/setup`, or pass `api-token` directly to `scan`                            |
+| `setup` fails with "not available for this runner" | Unsupported runner OS/arch for the fs-cli download        | Use a linux/darwin/windows runner on amd64 or arm64                                         |
+| `setup` fails downloading fs-cli with HTTP 403     | Pre-signed download URL expired or the token was rejected | Re-run the job; if it persists, regenerate the API token                                    |
+| `scan` fails with "name is required"               | Empty `name` input and no `GITHUB_REPOSITORY`             | Set the `name` input explicitly                                                             |
+| Results land in an unexpected/new project          | `name` defaulted to the repo name and created a match     | Pin `project-id` on `setup`, or set `name` to the exact platform project name               |
+| `upload` warns "Unexpected input(s) 'api-token'"   | Pinned to a build before standalone upload landed         | Repin to `@v2`; `api-token`/`domain`/`project-name`/`project-type` are supported inputs now |
+| `upload` fails "matches N files"                   | A glob matched sources/javadoc jars too                   | Narrow it, e.g. `target/app-[0-9]*.jar`, or pass an exact path                              |
+| `fs-cli` rejects `--project-id`                    | A project name was passed where an ID is expected         | Use `project-name` instead, and leave `project-id` unset                                    |
+| Argument in `extra-args` arrives split or garbled  | `extra-args` is whitespace-split, no quoting support      | Avoid values containing spaces; use a config file for those                                 |
+| Job fails but you wanted the raw exit code         | Non-zero `fs-cli` exit calls `setFailed`                  | Set `continue-on-error: true` and read `steps.<id>.outputs.exit-code`                       |
 
 ### Quality gate failures
 

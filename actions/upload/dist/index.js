@@ -25650,6 +25650,8 @@ module.exports = {
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.ProjectNotFoundError = exports.FsClient = void 0;
+exports.authUserIdentity = authUserIdentity;
+exports.authUserOrganization = authUserOrganization;
 exports.isProjectId = isProjectId;
 exports.resolveProjectId = resolveProjectId;
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -25746,10 +25748,28 @@ class FsClient {
         return Array.isArray(raw) ? raw : raw.projects;
     }
     /**
+     * POST /projects — creates a project. The platform rejects an empty
+     * description, so it falls back to the project name.
+     */
+    createProject(name, opts = {}) {
+        const body = {
+            name,
+            type: (opts.projectType || 'firmware').toLowerCase(),
+            description: opts.description || name,
+        };
+        if (opts.folderId) {
+            body.folderId = opts.folderId;
+        }
+        return this.post('/projects', body);
+    }
+    /**
      * POST /projects/{projectId}/versions — creates a new version.
      */
-    createVersion(projectId, versionName) {
-        return this.post(`/projects/${projectId}/versions`, { version: versionName });
+    createVersion(projectId, versionName, releaseType = 'RELEASE') {
+        return this.post(`/projects/${projectId}/versions`, {
+            version: versionName,
+            releaseType,
+        });
     }
     /**
      * Upload a scan file. Routes to different endpoints based on scan type.
@@ -25828,6 +25848,19 @@ class FsClient {
 }
 exports.FsClient = FsClient;
 // ── Helpers ───────────────────────────────────────────────────────────────────
+/**
+ * Returns a display-able identity from an /authUser response, probing the
+ * canonical `user` field first. Undefined when the shape is unrecognized.
+ */
+function authUserIdentity(authUser) {
+    return authUser.user || authUser.email || authUser.username || authUser.id || undefined;
+}
+/**
+ * Returns a display-able organization label, or undefined when absent.
+ */
+function authUserOrganization(authUser) {
+    return authUser.organization?.name || authUser.organization?.id || undefined;
+}
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /**
  * Returns true when the value looks like a UUID (the expected project ID format).
@@ -26689,24 +26722,86 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.run = run;
 const core = __importStar(__nccwpck_require__(4442));
 const fs_1 = __nccwpck_require__(9896);
+const promises_1 = __nccwpck_require__(1943);
 const path_1 = __nccwpck_require__(6928);
 const core_1 = __nccwpck_require__(2950);
+/**
+ * Expands `pattern` when it looks like a glob. Requires exactly one match — a
+ * Maven target/ directory happily matches sources and javadoc jars too, and
+ * uploading those silently would be worse than failing here.
+ */
+async function resolveFile(pattern) {
+    if (!/[*?[\]]/.test(pattern)) {
+        return pattern;
+    }
+    const matches = [];
+    for await (const match of (0, promises_1.glob)(pattern)) {
+        matches.push(match);
+    }
+    matches.sort();
+    if (matches.length === 0) {
+        throw new Error(`No file matches "${pattern}".`);
+    }
+    if (matches.length > 1) {
+        throw new Error(`"${pattern}" matches ${matches.length} files: ${matches.join(', ')}. ` +
+            `Narrow the pattern so it matches exactly one file.`);
+    }
+    core.info(`Resolved "${pattern}" to ${matches[0]}`);
+    return matches[0];
+}
+/**
+ * Returns the project ID for `name`, creating the project when none exists.
+ */
+async function resolveOrCreateProject(client, name, projectType) {
+    try {
+        return await (0, core_1.resolveProjectId)(client, name);
+    }
+    catch (err) {
+        if (!(err instanceof core_1.ProjectNotFoundError)) {
+            throw err;
+        }
+        const project = await client.createProject(name, { projectType });
+        core.info(`Created project "${name}" → ${project.id}`);
+        return project.id;
+    }
+}
 async function run() {
     try {
         // ── Read inputs ──────────────────────────────────────────────────────────
-        const type = core.getInput('type', { required: true });
-        const file = core.getInput('file', { required: true });
+        const types = core
+            .getInput('type', { required: true })
+            .split(',')
+            .map((t) => t.trim())
+            .filter(Boolean);
+        const fileInput = core.getInput('file', { required: true });
         const projectIdOverride = core.getInput('project-id') || undefined;
+        const projectNameInput = core.getInput('project-name') || undefined;
+        const projectType = core.getInput('project-type') || 'firmware';
+        const apiTokenOverride = core.getInput('api-token') || undefined;
+        const domainOverride = core.getInput('domain') || undefined;
         const versionName = core.getInput('version') || undefined;
         const versionIdInput = core.getInput('version-id') || undefined;
         const scannerType = core.getInput('scanner-type') || undefined;
         const sbomFormat = (core.getInput('sbom-format') || undefined);
         const waitForCompletion = core.getBooleanInput('wait-for-completion');
         const timeoutSecs = parseInt(core.getInput('timeout') || '600', 10);
-        // ── Read setup context with overrides ────────────────────────────────────
-        const ctx = (0, core_1.readSetupContext)({ projectId: projectIdOverride });
+        // ── Read setup context, falling back to this action's own inputs ─────────
+        // Running without the setup action is supported: pass api-token here.
+        const ctx = (0, core_1.readSetupContext)({
+            apiToken: apiTokenOverride,
+            domain: domainOverride,
+            projectId: projectIdOverride,
+        });
+        // Mask the token when it came from this action's input rather than setup.
+        core.setSecret(ctx.apiToken);
         // ── Build client ─────────────────────────────────────────────────────────
         const client = new core_1.FsClient({ apiToken: ctx.apiToken, domain: ctx.domain });
+        // ── Resolve project ──────────────────────────────────────────────────────
+        const projectName = projectNameInput || ctx.projectName;
+        let projectId = ctx.projectId;
+        if (!projectId && projectName) {
+            projectId = await resolveOrCreateProject(client, projectName, projectType);
+        }
         // ── Resolve version ID ───────────────────────────────────────────────────
         let projectVersionId;
         if (versionIdInput) {
@@ -26715,34 +26810,40 @@ async function run() {
         }
         else if (versionName) {
             // Create a new version — projectId is required
-            if (!ctx.projectId) {
-                throw new Error('project-id is required when creating a new version. ' +
-                    'Provide it as an input or run finite-state/setup first.');
+            if (!projectId) {
+                throw new Error('A project is required when creating a new version. Provide project-id or ' +
+                    'project-name, or run finite-state/setup first.');
             }
-            const version = await client.createVersion(ctx.projectId, versionName);
+            const version = await client.createVersion(projectId, versionName);
             projectVersionId = version.id;
         }
         else {
             throw new Error('Either version (to create a new version) or version-id (to use an existing one) must be provided.');
         }
         // ── Read file ────────────────────────────────────────────────────────────
+        const file = await resolveFile(fileInput);
         const data = (0, fs_1.readFileSync)(file);
         const filename = (0, path_1.basename)(file);
-        // ── Upload scan ──────────────────────────────────────────────────────────
-        const result = await client.uploadScan({
-            type,
-            filename,
-            projectVersionId,
-            data,
-            scannerType,
-            sbomFormat,
-        });
-        const scanId = result.id;
+        // ── Upload one scan per requested type ───────────────────────────────────
+        const scanIds = [];
+        for (const type of types) {
+            const result = await client.uploadScan({
+                type,
+                filename,
+                projectVersionId,
+                data,
+                scannerType,
+                sbomFormat,
+            });
+            scanIds.push(result.id);
+            core.info(`Uploaded ${filename} as ${type}: scan id=${result.id}`);
+        }
         // ── Set outputs & env var ────────────────────────────────────────────────
-        core.setOutput('scan-id', scanId);
+        core.setOutput('scan-id', scanIds[0]);
+        core.setOutput('scan-ids', scanIds.join(','));
         core.setOutput('version-id', projectVersionId);
         core.exportVariable('FINITE_STATE_VERSION_ID', projectVersionId);
-        core.info(`Scan uploaded: id=${scanId}, versionId=${projectVersionId}`);
+        core.info(`Uploaded ${scanIds.length} scan(s) to version ${projectVersionId}`);
         // ── Poll or submit ───────────────────────────────────────────────────────
         if (waitForCompletion) {
             const timeoutMs = timeoutSecs * 1000;
@@ -26833,6 +26934,14 @@ module.exports = require("events");
 
 "use strict";
 module.exports = require("fs");
+
+/***/ }),
+
+/***/ 1943:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("fs/promises");
 
 /***/ }),
 

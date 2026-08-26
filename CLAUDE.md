@@ -46,6 +46,7 @@ cd actions/setup && pnpm build
 - **client.ts** — `FsClient` wraps Finite State REST API. Retry logic: exponential backoff (`2^attempt * 500ms`), 6 retries for 429/502/503/504. Non-retryable: 400/401/403/404/500. `resolveProjectId` throws `ProjectNotFoundError` on zero matches — `setup` catches that specifically and continues without an ID; an ambiguous name still fails hard.
 - **context.ts** — Reads/writes `FINITE_STATE_AUTH_TOKEN`, `FINITE_STATE_DOMAIN`, `FINITE_STATE_PROJECT_ID`, `FINITE_STATE_PROJECT_NAME`, `FINITE_STATE_VERSION_ID` environment variables via `@actions/core`. The `setup` action calls `writeSetupContext()`; downstream actions call `readSetupContext()`.
 - **models.ts** — Shared enums (`Severity`, `ScanType`, `GateMode`, `SbomFormat`, etc.) and interfaces (`Finding`, `GateResult`, `ReportSummary`, etc.).
+- **client.ts / `authUserIdentity`** — `GET /authUser` returns `{ user, organization }`, not `{ email, organizationId }`. Use the helpers; reading `.email` directly is what made `setup` log `Authenticated as: undefined`.
 - **install-cli.ts** — `installFsCli()` downloads fs-cli from `GET /cli/download?os=&arch=` into `$RUNNER_TEMP/fs-cli` and `core.addPath`s it; `ensureFsCli()` reuses an fs-cli already on `PATH` and installs only when absent. `setup` uses the former, `scan` the latter.
 - **gates.ts** — `evaluateGates()` — three modes: `delta`, `threshold`, `triage-priority`.
 - **report-parser.ts** — Parses CSV output from `fs-report` tool (triage and version-delta formats).

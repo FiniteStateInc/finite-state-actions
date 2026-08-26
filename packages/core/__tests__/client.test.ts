@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { FsClient, ProjectNotFoundError, isProjectId, resolveProjectId } from '../src/client'
+import {
+  FsClient,
+  ProjectNotFoundError,
+  authUserIdentity,
+  authUserOrganization,
+  isProjectId,
+  resolveProjectId,
+} from '../src/client'
 import type { AuthUser, Project, Version, Scan } from '../src/models'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -51,6 +58,70 @@ describe('getAuthUser', () => {
   })
 })
 
+// ── authUser field mapping ────────────────────────────────────────────────────
+
+describe('authUserIdentity / authUserOrganization', () => {
+  it('reads the canonical `user` field', () => {
+    const raw = { user: 'martin@example.com', organization: { name: 'Acme', id: 'org-1' } }
+    expect(authUserIdentity(raw)).toBe('martin@example.com')
+    expect(authUserOrganization(raw)).toBe('Acme')
+  })
+
+  it('falls back through email, username, then id', () => {
+    expect(authUserIdentity({ email: 'a@b.c' })).toBe('a@b.c')
+    expect(authUserIdentity({ username: 'martin' })).toBe('martin')
+    expect(authUserIdentity({ id: 'u-1' })).toBe('u-1')
+  })
+
+  it('returns undefined for an unrecognized shape', () => {
+    expect(authUserIdentity({})).toBeUndefined()
+    expect(authUserOrganization({})).toBeUndefined()
+  })
+
+  it('falls back to the organization id when no name is present', () => {
+    expect(authUserOrganization({ organization: { id: 'org-9' } })).toBe('org-9')
+  })
+})
+
+// ── createProject ─────────────────────────────────────────────────────────────
+
+describe('createProject', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('POSTs name, lowercased type, and a description defaulting to the name', async () => {
+    const mockFetch = makeFetch({ id: '-406504', name: 'WebGoat-BINARY' })
+    vi.stubGlobal('fetch', mockFetch)
+
+    const client = new FsClient({ apiToken: 'tok', domain: 'example.com' })
+    const project = await client.createProject('WebGoat-BINARY', { projectType: 'APPLICATION' })
+
+    const [url, opts] = mockFetch.mock.calls[0]
+    expect(url).toBe('https://example.com/api/public/v0/projects')
+    expect(opts.method).toBe('POST')
+    expect(JSON.parse(opts.body)).toEqual({
+      name: 'WebGoat-BINARY',
+      type: 'application',
+      description: 'WebGoat-BINARY',
+    })
+    expect(project.id).toBe('-406504')
+  })
+
+  it('defaults the type to firmware and includes folderId when given', async () => {
+    const mockFetch = makeFetch({ id: 'p1', name: 'Thing' })
+    vi.stubGlobal('fetch', mockFetch)
+
+    const client = new FsClient({ apiToken: 'tok', domain: 'example.com' })
+    await client.createProject('Thing', { folderId: 'f-1', description: 'Custom' })
+
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({
+      name: 'Thing',
+      type: 'firmware',
+      description: 'Custom',
+      folderId: 'f-1',
+    })
+  })
+})
+
 // ── getCliDownloadUrl ─────────────────────────────────────────────────────────
 
 describe('getCliDownloadUrl', () => {
@@ -87,7 +158,7 @@ describe('createVersion', () => {
     const [url, opts] = mockFetch.mock.calls[0]
     expect(url).toBe('https://example.com/api/public/v0/projects/proj1/versions')
     expect(opts.method).toBe('POST')
-    expect(JSON.parse(opts.body)).toEqual({ version: 'v1.0' })
+    expect(JSON.parse(opts.body)).toEqual({ version: 'v1.0', releaseType: 'RELEASE' })
     expect(result).toEqual(version)
   })
 })

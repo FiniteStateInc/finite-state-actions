@@ -32,6 +32,9 @@ vi.mock('@finite-state/core', () => {
       getAuthUser: mockGetAuthUser,
     })),
     ProjectNotFoundError,
+    authUserIdentity: (u: Record<string, unknown>) => u?.user ?? u?.email ?? undefined,
+    authUserOrganization: (u: { organization?: { name?: string; id?: string } }) =>
+      u?.organization?.name ?? u?.organization?.id ?? undefined,
     installFsCli: (...args: unknown[]) => mockInstallFsCli(...args),
     writeSetupContext: vi.fn(),
     resolveProjectId: (...args: unknown[]) => mockResolveProjectId(...args),
@@ -62,9 +65,8 @@ describe('setup action', () => {
     })
 
     mockGetAuthUser.mockResolvedValue({
-      id: 'user-1',
-      email: 'testuser@example.com',
-      organizationId: 'org-1',
+      user: 'testuser@example.com',
+      organization: { id: 'org-1', name: 'Test Org' },
     })
 
     mockResolveProjectId.mockImplementation((_client: unknown, value: string) =>
@@ -92,7 +94,7 @@ describe('setup action', () => {
     })
 
     expect(core.setOutput).toHaveBeenCalledWith('user', 'testuser@example.com')
-    expect(core.setOutput).toHaveBeenCalledWith('org-name', 'org-1')
+    expect(core.setOutput).toHaveBeenCalledWith('org-name', 'Test Org')
     expect(core.setOutput).toHaveBeenCalledWith('project-id', 'proj-123')
     expect(core.setOutput).toHaveBeenCalledWith('version-id', 'ver-456')
     expect(mockInstallFsCli).toHaveBeenCalledOnce()
@@ -204,5 +206,14 @@ describe('setup action', () => {
 
     expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('Multiple projects match'))
     expect(core.warning).not.toHaveBeenCalled()
+  })
+
+  it('warns when /authUser returns an unrecognized shape', async () => {
+    mockGetAuthUser.mockResolvedValue({ somethingElse: true })
+
+    await run()
+
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('unrecognized /authUser'))
+    expect(core.setFailed).not.toHaveBeenCalled()
   })
 })

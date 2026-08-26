@@ -5,6 +5,12 @@ branding:
   icon: 'upload-cloud'
   color: 'gray'
 inputs:
+  api-token:
+    description: 'Finite State API token. Only needed when the setup action did not run in this job.'
+    required: false
+  domain:
+    description: 'Finite State platform domain. Defaults to the setup context, then app.finitestate.io.'
+    required: false
   type:
     description: 'Scan type: sca, sast, config, vulnerability-analysis, sbom, third-party'
     required: true
@@ -14,6 +20,13 @@ inputs:
   project-id:
     description: 'Project ID override (falls back to setup context)'
     required: false
+  project-name:
+    description: 'Project name. Created if no project matches. Ignored when project-id is set.'
+    required: false
+  project-type:
+    description: 'Type used when creating a project: firmware, application, library, container, device, file, etc.'
+    required: false
+    default: 'firmware'
   version:
     description: 'Version name — creates a new version (mutually exclusive with version-id)'
     required: false
@@ -36,8 +49,11 @@ inputs:
     default: '600'
 outputs:
   scan-id:
-    description: 'ID of the created scan'
+    description: 'ID of the first created scan'
     value: ${{ steps.upload.outputs.scan-id }}
+  scan-ids:
+    description: 'Comma-separated IDs of every created scan'
+    value: ${{ steps.upload.outputs.scan-ids }}
   version-id:
     description: 'ID of the project version'
     value: ${{ steps.upload.outputs.version-id }}
@@ -56,9 +72,13 @@ runs:
       id: upload
       uses: FiniteStateInc/finite-state-actions/actions/upload@v2
       with:
+        api-token: ${{ inputs.api-token }}
+        domain: ${{ inputs.domain }}
         type: ${{ inputs.type }}
         file: ${{ inputs.file }}
         project-id: ${{ inputs.project-id }}
+        project-name: ${{ inputs.project-name }}
+        project-type: ${{ inputs.project-type }}
         version: ${{ inputs.version }}
         version-id: ${{ inputs.version-id }}
         scanner-type: ${{ inputs.scanner-type }}

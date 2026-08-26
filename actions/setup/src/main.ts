@@ -2,6 +2,8 @@ import * as core from '@actions/core'
 import {
   FsClient,
   ProjectNotFoundError,
+  authUserIdentity,
+  authUserOrganization,
   installFsCli,
   resolveProjectId,
   writeSetupContext,
@@ -24,8 +26,17 @@ export async function run(): Promise<void> {
     const client = new FsClient({ apiToken, domain })
     const authUser = await client.getAuthUser()
 
-    core.info(`Authenticated as: ${authUser.email}`)
-    core.info(`Organization ID: ${authUser.organizationId}`)
+    const identity = authUserIdentity(authUser)
+    const organization = authUserOrganization(authUser)
+
+    if (!identity) {
+      core.warning(
+        'The platform accepted the token but returned an unrecognized /authUser response. ' +
+          'Check that the domain matches the tenant the token was issued from.',
+      )
+    }
+    core.info(`Authenticated as: ${identity ?? 'unknown'}`)
+    core.info(`Organization: ${organization ?? 'unknown'}`)
 
     // ── Install fs-cli ───────────────────────────────────────────────────────
     await installFsCli(client)
@@ -55,8 +66,8 @@ export async function run(): Promise<void> {
     writeSetupContext({ apiToken, domain, projectId, projectName: projectNameInput, versionId })
 
     // ── Set outputs ──────────────────────────────────────────────────────────
-    core.setOutput('user', authUser.email)
-    core.setOutput('org-name', authUser.organizationId)
+    core.setOutput('user', identity ?? '')
+    core.setOutput('org-name', organization ?? '')
 
     if (projectId) {
       core.setOutput('project-id', projectId)

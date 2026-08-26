@@ -24,10 +24,25 @@ export type SbomFormat = 'cyclonedx' | 'spdx'
 
 // ── Entity Types ───────────────────────────────────────────────────────────────
 
+/**
+ * `GET /authUser` returns `{ user: "<email>", organization: {...} }` — the
+ * identity is under `user`, not `email`. Alternate keys are kept as optional
+ * fallbacks for older platform builds.
+ */
 export interface AuthUser {
-  id: string
-  email: string
-  organizationId: string
+  user?: string
+  email?: string
+  username?: string
+  id?: string
+  organization?: { id?: string; name?: string }
+}
+
+export interface CreateProjectOptions {
+  /** Platform requires a non-empty description; defaults to the name. */
+  description?: string
+  /** Lowercased by the client. e.g. firmware, application, library. */
+  projectType?: string
+  folderId?: string
 }
 
 export interface Project {

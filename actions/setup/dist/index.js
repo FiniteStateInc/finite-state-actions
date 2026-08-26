@@ -25650,6 +25650,8 @@ module.exports = {
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.ProjectNotFoundError = exports.FsClient = void 0;
+exports.authUserIdentity = authUserIdentity;
+exports.authUserOrganization = authUserOrganization;
 exports.isProjectId = isProjectId;
 exports.resolveProjectId = resolveProjectId;
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -25746,10 +25748,28 @@ class FsClient {
         return Array.isArray(raw) ? raw : raw.projects;
     }
     /**
+     * POST /projects — creates a project. The platform rejects an empty
+     * description, so it falls back to the project name.
+     */
+    createProject(name, opts = {}) {
+        const body = {
+            name,
+            type: (opts.projectType || 'firmware').toLowerCase(),
+            description: opts.description || name,
+        };
+        if (opts.folderId) {
+            body.folderId = opts.folderId;
+        }
+        return this.post('/projects', body);
+    }
+    /**
      * POST /projects/{projectId}/versions — creates a new version.
      */
-    createVersion(projectId, versionName) {
-        return this.post(`/projects/${projectId}/versions`, { version: versionName });
+    createVersion(projectId, versionName, releaseType = 'RELEASE') {
+        return this.post(`/projects/${projectId}/versions`, {
+            version: versionName,
+            releaseType,
+        });
     }
     /**
      * Upload a scan file. Routes to different endpoints based on scan type.
@@ -25828,6 +25848,19 @@ class FsClient {
 }
 exports.FsClient = FsClient;
 // ── Helpers ───────────────────────────────────────────────────────────────────
+/**
+ * Returns a display-able identity from an /authUser response, probing the
+ * canonical `user` field first. Undefined when the shape is unrecognized.
+ */
+function authUserIdentity(authUser) {
+    return authUser.user || authUser.email || authUser.username || authUser.id || undefined;
+}
+/**
+ * Returns a display-able organization label, or undefined when absent.
+ */
+function authUserOrganization(authUser) {
+    return authUser.organization?.name || authUser.organization?.id || undefined;
+}
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /**
  * Returns true when the value looks like a UUID (the expected project ID format).
@@ -26703,8 +26736,14 @@ async function run() {
         // ── Validate auth ────────────────────────────────────────────────────────
         const client = new core_1.FsClient({ apiToken, domain });
         const authUser = await client.getAuthUser();
-        core.info(`Authenticated as: ${authUser.email}`);
-        core.info(`Organization ID: ${authUser.organizationId}`);
+        const identity = (0, core_1.authUserIdentity)(authUser);
+        const organization = (0, core_1.authUserOrganization)(authUser);
+        if (!identity) {
+            core.warning('The platform accepted the token but returned an unrecognized /authUser response. ' +
+                'Check that the domain matches the tenant the token was issued from.');
+        }
+        core.info(`Authenticated as: ${identity ?? 'unknown'}`);
+        core.info(`Organization: ${organization ?? 'unknown'}`);
         // ── Install fs-cli ───────────────────────────────────────────────────────
         await (0, core_1.installFsCli)(client);
         // ── Resolve project ID ──────────────────────────────────────────────────
@@ -26730,8 +26769,8 @@ async function run() {
         // ── Export context for downstream actions ────────────────────────────────
         (0, core_1.writeSetupContext)({ apiToken, domain, projectId, projectName: projectNameInput, versionId });
         // ── Set outputs ──────────────────────────────────────────────────────────
-        core.setOutput('user', authUser.email);
-        core.setOutput('org-name', authUser.organizationId);
+        core.setOutput('user', identity ?? '');
+        core.setOutput('org-name', organization ?? '');
         if (projectId) {
             core.setOutput('project-id', projectId);
         }

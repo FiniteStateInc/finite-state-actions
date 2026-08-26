@@ -5,15 +5,28 @@ branding:
   icon: 'upload-cloud'
   color: 'blue'
 inputs:
+  api-token:
+    description: 'Finite State API token. Only needed when the setup action did not run in this job.'
+    required: false
+  domain:
+    description: 'Finite State platform domain. Defaults to the setup context, then app.finitestate.io.'
+    required: false
   type:
-    description: 'Scan type: sca, sast, config, vulnerability-analysis, sbom, third-party'
+    description: 'Scan type, or a comma-separated list: sca, sast, config, vulnerability-analysis, sbom, third-party'
     required: true
   file:
-    description: 'Path to the file to upload'
+    description: 'Path to the file to upload. A glob is allowed if it matches exactly one file.'
     required: true
   project-id:
     description: 'Project ID override (falls back to setup context)'
     required: false
+  project-name:
+    description: 'Project name. Created if no project matches. Ignored when project-id is set.'
+    required: false
+  project-type:
+    description: 'Type used when creating a project: firmware, application, library, container, device, file, etc.'
+    required: false
+    default: 'firmware'
   version:
     description: 'Version name — creates a new version (mutually exclusive with version-id)'
     required: false
@@ -36,7 +49,9 @@ inputs:
     default: '600'
 outputs:
   scan-id:
-    description: 'ID of the created scan'
+    description: 'ID of the first created scan'
+  scan-ids:
+    description: 'Comma-separated IDs of every created scan (one per requested type)'
   version-id:
     description: 'ID of the project version'
   scan-status:

@@ -1,4 +1,12 @@
-import type { AuthUser, Project, Version, Scan, ScanType, SbomFormat } from './models'
+import type {
+  AuthUser,
+  CreateProjectOptions,
+  Project,
+  Version,
+  Scan,
+  ScanType,
+  SbomFormat,
+} from './models'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -138,10 +146,29 @@ export class FsClient {
   }
 
   /**
+   * POST /projects — creates a project. The platform rejects an empty
+   * description, so it falls back to the project name.
+   */
+  createProject(name: string, opts: CreateProjectOptions = {}): Promise<Project> {
+    const body: Record<string, unknown> = {
+      name,
+      type: (opts.projectType || 'firmware').toLowerCase(),
+      description: opts.description || name,
+    }
+    if (opts.folderId) {
+      body.folderId = opts.folderId
+    }
+    return this.post<Project>('/projects', body)
+  }
+
+  /**
    * POST /projects/{projectId}/versions — creates a new version.
    */
-  createVersion(projectId: string, versionName: string): Promise<Version> {
-    return this.post<Version>(`/projects/${projectId}/versions`, { version: versionName })
+  createVersion(projectId: string, versionName: string, releaseType = 'RELEASE'): Promise<Version> {
+    return this.post<Version>(`/projects/${projectId}/versions`, {
+      version: versionName,
+      releaseType,
+    })
   }
 
   /**
@@ -241,6 +268,21 @@ export class FsClient {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Returns a display-able identity from an /authUser response, probing the
+ * canonical `user` field first. Undefined when the shape is unrecognized.
+ */
+export function authUserIdentity(authUser: AuthUser): string | undefined {
+  return authUser.user || authUser.email || authUser.username || authUser.id || undefined
+}
+
+/**
+ * Returns a display-able organization label, or undefined when absent.
+ */
+export function authUserOrganization(authUser: AuthUser): string | undefined {
+  return authUser.organization?.name || authUser.organization?.id || undefined
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
