@@ -19,7 +19,7 @@ inputs:
     required: false
     default: '.'
   project-id:
-    description: 'Project ID (UUID) or name. Overrides value from setup.'
+    description: 'Platform project ID. Overrides value from setup. Use project-name to target a project by name.'
     required: false
   version:
     description: 'Version label for the scan (e.g. v1.2.3 or pr-42)'

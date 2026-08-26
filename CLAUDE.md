@@ -43,10 +43,10 @@ cd actions/setup && pnpm build
 
 `@finite-state/core` — imported by all actions via `workspace:*`. Everything is re-exported from `src/index.ts`.
 
-- **client.ts** — `FsClient` wraps Finite State REST API. Retry logic: exponential backoff (`2^attempt * 500ms`), 6 retries for 429/502/503/504. Non-retryable: 400/401/403/404/500.
+- **client.ts** — `FsClient` wraps Finite State REST API. Retry logic: exponential backoff (`2^attempt * 500ms`), 6 retries for 429/502/503/504. Non-retryable: 400/401/403/404/500. `resolveProjectId` throws `ProjectNotFoundError` on zero matches — `setup` catches that specifically and continues without an ID; an ambiguous name still fails hard.
 - **context.ts** — Reads/writes `FINITE_STATE_AUTH_TOKEN`, `FINITE_STATE_DOMAIN`, `FINITE_STATE_PROJECT_ID`, `FINITE_STATE_PROJECT_NAME`, `FINITE_STATE_VERSION_ID` environment variables via `@actions/core`. The `setup` action calls `writeSetupContext()`; downstream actions call `readSetupContext()`.
 - **models.ts** — Shared enums (`Severity`, `ScanType`, `GateMode`, `SbomFormat`, etc.) and interfaces (`Finding`, `GateResult`, `ReportSummary`, etc.).
-- **client.ts / `ProjectNotFoundError`** — thrown by `resolveProjectId` when a name matches zero projects. `setup` catches it and continues without an ID (fs-cli creates the project later); an ambiguous name still fails hard.
+- **install-cli.ts** — `installFsCli()` downloads fs-cli from `GET /cli/download?os=&arch=` into `$RUNNER_TEMP/fs-cli` and `core.addPath`s it; `ensureFsCli()` reuses an fs-cli already on `PATH` and installs only when absent. `setup` uses the former, `scan` the latter.
 - **gates.ts** — `evaluateGates()` — three modes: `delta`, `threshold`, `triage-priority`.
 - **report-parser.ts** — Parses CSV output from `fs-report` tool (triage and version-delta formats).
 - **formatting.ts** — Renders markdown for PR comments; edit-in-place works by embedding an HTML comment tag the action greps for on re-run.
@@ -73,9 +73,10 @@ Two actions shell out via `@actions/exec` rather than the REST API: `scan` runs 
 
 ### Build & Release
 
+- All seven actions declare `using: 'node24'`. Bundles are built by ncc, not transpiled per-runtime, so the runtime lives only in `action.yml`.
 - Actions are bundled with `@vercel/ncc` into `dist/index.js`. **These bundles are committed** and CI fails the `build` job if `git diff actions/*/dist/` is non-empty — always run `pnpm build` and commit the bundle with any source change.
 - Root `.gitignore` lists `dist/` and `*.js`. Existing action bundles are already tracked so the rule doesn't affect them, but a **new** action's `dist/` needs `git add -f`.
-- Tagging `v*` runs CI, creates a GitHub Release, and force-moves the major tag (`v1`). Consumers pin `FiniteStateInc/finite-state-actions/actions/<name>@v1`, so a broken committed bundle ships immediately.
+- Tagging `v*` runs CI, creates a GitHub Release, and force-moves the major tag (`v2`). Consumers pin `FiniteStateInc/finite-state-actions/actions/<name>@v2`, so a broken committed bundle ships immediately. The current major is `v2`; `v2` is also moved by hand when shipping fixes without a new semver tag.
 
 ### Adding or changing an action
 

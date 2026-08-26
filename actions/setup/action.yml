@@ -13,7 +13,7 @@ inputs:
     required: false
     default: 'app.finitestate.io'
   project-id:
-    description: 'Project ID (UUID) for subsequent actions'
+    description: 'Platform project ID for subsequent actions'
     required: false
   project-name:
     description: 'Exact project name. Resolved to a project ID. Mutually exclusive with project-id.'
