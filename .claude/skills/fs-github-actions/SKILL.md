@@ -139,35 +139,37 @@ Uploads a binary, SBOM, or third-party scan results for analysis. Handles all up
 | `scanner-type`        | no       | —          | Required for `third-party` — e.g., `grype`, `trivy`, `snyk`              |
 | `sbom-format`         | no       | —          | Required for `sbom` — `cdx` or `spdx`                                    |
 | `wait-for-completion` | no       | `true`     | Poll scan status until done                                              |
-| `timeout`             | no       | `600`      | Max wait time in seconds                                                 |
+| `timeout`             | no       | `600`      | Max wait in seconds, applied to the upload and again to the scan poll    |
 
-**Upload type routing:**
+`project-type` is still accepted but ignored — `fs-cli` creates the project and the platform assigns its type. Passing it logs a warning.
 
-| Type                     | Endpoint                  | Use case                                            |
-| ------------------------ | ------------------------- | --------------------------------------------------- |
-| `sca`                    | `POST /scans`             | Binary SCA scan                                     |
-| `sast`                   | `POST /scans`             | Static analysis                                     |
-| `config`                 | `POST /scans`             | Configuration audit                                 |
-| `vulnerability-analysis` | `POST /scans`             | Reachability analysis                               |
-| `sbom`                   | `POST /scans/sbom`        | CycloneDX/SPDX import                               |
-| `third-party`            | `POST /scans/third-party` | External scanner results (Grype, Trivy, Snyk, etc.) |
+**Upload type routing:** every type goes through `fs-cli`, not the REST API — the REST upload endpoint sits behind a ~4.5 MB serverless payload cap, and `fs-cli` streams instead.
+
+| Type                     | fs-cli command       | Use case                                            |
+| ------------------------ | -------------------- | --------------------------------------------------- |
+| `sca`                    | `fs-cli upload`      | Binary SCA scan                                     |
+| `sast`                   | `fs-cli upload`      | Static analysis                                     |
+| `config`                 | `fs-cli upload`      | Configuration audit                                 |
+| `vulnerability-analysis` | `fs-cli upload`      | Reachability analysis                               |
+| `sbom`                   | `fs-cli import`      | CycloneDX/SPDX import                               |
+| `third-party`            | `fs-cli third-party` | External scanner results (Grype, Trivy, Snyk, etc.) |
 
 **Outputs:**
 
-| Output        | Description                                 |
-| ------------- | ------------------------------------------- |
-| `scan-id`     | ID of the first created scan                |
-| `scan-ids`    | Comma-separated IDs of every created scan   |
-| `version-id`  | The version ID (created or existing)        |
-| `scan-status` | Final scan status (`COMPLETED` or `FAILED`) |
+| Output        | Description                                                                    |
+| ------------- | ------------------------------------------------------------------------------ |
+| `version-id`  | The version ID (created or existing), read back from `fs-cli` output           |
+| `scan-status` | `COMPLETED`, `FAILED`, `RUNNING`, `NOT_FOUND`, or `SUBMITTED` when not waiting |
 
-**Standalone use (v2.1 and later):** like `scan`, `upload` accepts `api-token`, `domain`, and `project-name` directly, so `setup` is optional. If no project matches `project-name`, it is created via `POST /projects` using `project-type` (default `firmware`).
+> `scan-id` and `scan-ids` are no longer produced: `fs-cli` reports scans as a per-type rollup, not as individual scan record IDs. Use `version-id` downstream — every other action keys off it.
 
-**Multiple types:** `type` accepts a comma-separated list (`sca,sast,config,vulnerability-analysis`). The same file is uploaded once per type against one version. `scan-id` is the first scan; `scan-ids` lists all of them.
+**Standalone use (v2.1 and later):** like `scan`, `upload` accepts `api-token`, `domain`, and `project-name` directly, so `setup` is optional. `fs-cli` find-or-creates both the project and the version, so a name that matches nothing is created on upload.
+
+**Multiple types:** `type` accepts a comma-separated list (`sca,sast,config,vulnerability-analysis`) handled by one `fs-cli upload` invocation against one version. `sbom` and `third-party` use different commands, so they cannot be combined with each other or with the binary types — use one step per group.
 
 **Globs:** `file` may be a glob, but it must match exactly one file — `target/*.jar` in a Maven build also matches `-sources.jar` and `-javadoc.jar`, so an ambiguous match fails with the list rather than uploading the wrong artifact.
 
-**Behavior:** Resolves project/version from inputs or setup context. If `version` name is provided, creates a new version via `POST /projects/{id}/versions`. Routes to the correct upload endpoint based on `type`. When `wait-for-completion` is true, polls `GET /scans?filter=projectVersion=={pvId}` until complete or timed out.
+**Behavior:** Passes the project/version locator straight to `fs-cli` (`--name`/`--version`, or `--project-id`/`--version-id` when known), which find-or-creates both. The version ID is parsed from the `project=… version=…` line `fs-cli` prints on success. When `wait-for-completion` is true, `fs-cli query --type scan --wait --fail-on-scan-incomplete` polls until every scan for the version settles; a failed scan, a poll timeout, or a version with no scans fails the step. The API token is passed via `FS_TOKEN`, never on the command line. The only REST call the action makes is the `fs-cli` download when the binary is not already on `PATH`.
 
 **Examples:**
 
@@ -185,6 +187,7 @@ Uploads a binary, SBOM, or third-party scan results for analysis. Handles all up
     type: third-party
     scanner-type: grype
     file: grype-results.json
+    version: 'v${{ github.sha }}'
 
 # SBOM import
 - uses: finite-state/upload@v2
@@ -192,6 +195,7 @@ Uploads a binary, SBOM, or third-party scan results for analysis. Handles all up
     type: sbom
     sbom-format: cdx
     file: sbom.json
+    version: 'v${{ github.sha }}'
 ```
 
 ---
@@ -456,7 +460,7 @@ setup (validates auth, exports env vars, installs fs-cli)   [optional if only sc
   |       |-- outputs: exit-code
   |
   +---> upload (uploads binary/SBOM/third-party results)
-  |       |-- outputs: scan-id, version-id, scan-status
+  |       |-- outputs: version-id, scan-status
   |
   v
 run-report (reads env + setup/upload outputs)

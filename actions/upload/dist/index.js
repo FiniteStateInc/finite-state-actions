@@ -26721,10 +26721,16 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.run = run;
 const core = __importStar(__nccwpck_require__(4442));
-const fs_1 = __nccwpck_require__(9896);
+const exec = __importStar(__nccwpck_require__(7167));
 const promises_1 = __nccwpck_require__(1943);
-const path_1 = __nccwpck_require__(6928);
 const core_1 = __nccwpck_require__(2950);
+// ── Scan-type routing ─────────────────────────────────────────────────────────
+/** Types fs-cli's `upload` subcommand handles, in its own naming. */
+const BINARY_TYPES = new Set(['sca', 'sast', 'config', 'vulnerability_analysis']);
+/** Our inputs use hyphens; fs-cli uses underscores. */
+function normalizeType(type) {
+    return type.trim().replace(/-/g, '_');
+}
 /**
  * Expands `pattern` when it looks like a glob. Requires exactly one match — a
  * Maven target/ directory happily matches sources and javadoc jars too, and
@@ -26750,20 +26756,109 @@ async function resolveFile(pattern) {
     return matches[0];
 }
 /**
- * Returns the project ID for `name`, creating the project when none exists.
+ * Runs fs-cli, capturing stdout. The token goes through FS_TOKEN rather than
+ * `--token` so it never lands in the process argument list.
  */
-async function resolveOrCreateProject(client, name, projectType) {
+async function runFsCli(binary, args, token) {
+    let stdout = '';
+    const exitCode = await exec.exec(binary, args, {
+        ignoreReturnCode: true,
+        env: { ...process.env, FS_TOKEN: token },
+        listeners: {
+            stdout: (data) => {
+                stdout += data.toString();
+            },
+        },
+    });
+    return { exitCode, stdout };
+}
+/**
+ * Pulls the IDs out of fs-cli's completion line — `upload`/`third-party` print
+ * `upload complete: project=<id> version=<id>`, `import` prints
+ * `Imported SBOM: project=<id> version=<id>`.
+ */
+function parseUploadIds(stdout) {
+    const match = /project=(\S+)\s+version=(\S+)/.exec(stdout);
+    return match ? { projectId: match[1], versionId: match[2] } : {};
+}
+/** Extracts the JSON object from output that may carry log lines around it. */
+function parseJsonBlock(stdout) {
+    const start = stdout.indexOf('{');
+    const end = stdout.lastIndexOf('}');
+    if (start === -1 || end <= start) {
+        return undefined;
+    }
     try {
-        return await (0, core_1.resolveProjectId)(client, name);
+        return JSON.parse(stdout.slice(start, end + 1));
     }
-    catch (err) {
-        if (!(err instanceof core_1.ProjectNotFoundError)) {
-            throw err;
+    catch {
+        return undefined;
+    }
+}
+/**
+ * Rolls the per-type scan summary up into one status for the `scan-status`
+ * output.
+ */
+function summarizeStatus(result) {
+    const tests = result?.tests;
+    if (!result?.found || !tests || tests.totalTests === 0) {
+        return 'NOT_FOUND';
+    }
+    if (tests.failedTests > 0) {
+        return 'FAILED';
+    }
+    return tests.completedTests + tests.failedTests >= tests.totalTests ? 'COMPLETED' : 'RUNNING';
+}
+/**
+ * Builds the fs-cli argument list for the requested scan types. Binary types
+ * go through `upload` (one invocation covers a comma-separated list); SBOMs
+ * through `import`; external scanner output through `third-party`.
+ */
+function buildFsCliArgs(opts) {
+    const { types, file, locator } = opts;
+    const binary = types.filter((t) => BINARY_TYPES.has(t));
+    const special = types.filter((t) => !BINARY_TYPES.has(t));
+    if (binary.length && special.length) {
+        throw new Error(`type mixes binary scan types (${binary.join(',')}) with ${special.join(',')}, which use ` +
+            `different upload paths. Use one upload step per group.`);
+    }
+    if (special.length > 1) {
+        throw new Error(`type "${special.join(',')}" cannot be combined. Use one upload step per type.`);
+    }
+    if (special.length === 1) {
+        const type = special[0];
+        if (type === 'sbom') {
+            const format = opts.sbomFormat === 'spdx' ? 'spdx' : 'cyclonedx';
+            // `import` has no --timeout of its own.
+            return ['import', file, ...locator, '--format', format];
         }
-        const project = await client.createProject(name, { projectType });
-        core.info(`Created project "${name}" → ${project.id}`);
-        return project.id;
+        if (type === 'third_party') {
+            if (!opts.scannerType) {
+                throw new Error('scanner-type is required when type is third-party.');
+            }
+            return [
+                'third-party',
+                file,
+                ...locator,
+                '--type',
+                opts.scannerType,
+                '--timeout',
+                String(opts.timeoutMinutes),
+            ];
+        }
+        throw new Error(`Unknown scan type "${type}". Valid: sca, sast, config, vulnerability-analysis, sbom, ` +
+            `third-party.`);
     }
+    // One fs-cli upload covers every binary type in a comma-separated list.
+    return [
+        'upload',
+        file,
+        ...locator,
+        '--type',
+        binary.join(','),
+        '--timeout',
+        String(opts.timeoutMinutes),
+    ];
 }
 async function run() {
     try {
@@ -26771,12 +26866,11 @@ async function run() {
         const types = core
             .getInput('type', { required: true })
             .split(',')
-            .map((t) => t.trim())
+            .map(normalizeType)
             .filter(Boolean);
         const fileInput = core.getInput('file', { required: true });
         const projectIdOverride = core.getInput('project-id') || undefined;
         const projectNameInput = core.getInput('project-name') || undefined;
-        const projectType = core.getInput('project-type') || 'firmware';
         const apiTokenOverride = core.getInput('api-token') || undefined;
         const domainOverride = core.getInput('domain') || undefined;
         const versionName = core.getInput('version') || undefined;
@@ -26785,6 +26879,10 @@ async function run() {
         const sbomFormat = (core.getInput('sbom-format') || undefined);
         const waitForCompletion = core.getBooleanInput('wait-for-completion');
         const timeoutSecs = parseInt(core.getInput('timeout') || '600', 10);
+        const timeoutMinutes = Math.max(1, Math.ceil(timeoutSecs / 60));
+        if (core.getInput('project-type')) {
+            core.warning('project-type is ignored: fs-cli creates the project, and the platform picks the type.');
+        }
         // ── Read setup context, falling back to this action's own inputs ─────────
         // Running without the setup action is supported: pass api-token here.
         const ctx = (0, core_1.readSetupContext)({
@@ -26794,67 +26892,82 @@ async function run() {
         });
         // Mask the token when it came from this action's input rather than setup.
         core.setSecret(ctx.apiToken);
-        // ── Build client ─────────────────────────────────────────────────────────
-        const client = new core_1.FsClient({ apiToken: ctx.apiToken, domain: ctx.domain });
-        // ── Resolve project ──────────────────────────────────────────────────────
         const projectName = projectNameInput || ctx.projectName;
-        let projectId = ctx.projectId;
-        if (!projectId && projectName) {
-            projectId = await resolveOrCreateProject(client, projectName, projectType);
+        if (!ctx.projectId && !projectName && !versionIdInput) {
+            throw new Error('A project is required. Provide project-id or project-name, or run finite-state/setup first.');
         }
-        // ── Resolve version ID ───────────────────────────────────────────────────
-        let projectVersionId;
-        if (versionIdInput) {
-            // Use existing version-id directly
-            projectVersionId = versionIdInput;
-        }
-        else if (versionName) {
-            // Create a new version — projectId is required
-            if (!projectId) {
-                throw new Error('A project is required when creating a new version. Provide project-id or ' +
-                    'project-name, or run finite-state/setup first.');
-            }
-            const version = await client.createVersion(projectId, versionName);
-            projectVersionId = version.id;
-        }
-        else {
+        if (!versionName && !versionIdInput) {
             throw new Error('Either version (to create a new version) or version-id (to use an existing one) must be provided.');
         }
-        // ── Read file ────────────────────────────────────────────────────────────
+        // ── Build the project/version locator ────────────────────────────────────
+        // fs-cli find-or-creates the project and version itself, so this action
+        // makes no API calls of its own beyond fetching the CLI. --name is passed
+        // even alongside --project-id because fs-cli validates it before deciding
+        // the ID makes it redundant.
+        const endpoint = `https://${ctx.domain}`;
+        const name = projectName || ctx.projectId;
+        const locator = [
+            '--endpoint',
+            endpoint,
+            ...(name ? ['--name', name] : []),
+            ...(versionName ? ['--version', versionName] : []),
+            ...(ctx.projectId ? ['--project-id', ctx.projectId] : []),
+            ...(versionIdInput ? ['--version-id', versionIdInput] : []),
+        ];
         const file = await resolveFile(fileInput);
-        const data = (0, fs_1.readFileSync)(file);
-        const filename = (0, path_1.basename)(file);
-        // ── Upload one scan per requested type ───────────────────────────────────
-        const scanIds = [];
-        for (const type of types) {
-            const result = await client.uploadScan({
-                type,
-                filename,
-                projectVersionId,
-                data,
-                scannerType,
-                sbomFormat,
-            });
-            scanIds.push(result.id);
-            core.info(`Uploaded ${filename} as ${type}: scan id=${result.id}`);
+        const fsCli = await (0, core_1.ensureFsCli)(new core_1.FsClient({ apiToken: ctx.apiToken, domain: ctx.domain }));
+        const args = buildFsCliArgs({
+            types,
+            file,
+            locator,
+            scannerType,
+            sbomFormat,
+            timeoutMinutes,
+        });
+        // ── Upload through fs-cli ────────────────────────────────────────────────
+        core.info(`Uploading ${file} (${types.join(',')}) via fs-cli ${args[0]}`);
+        const upload = await runFsCli(fsCli, args, ctx.apiToken);
+        if (upload.exitCode !== 0) {
+            throw new Error(`fs-cli ${args[0]} exited with code ${upload.exitCode}`);
         }
-        // ── Set outputs & env var ────────────────────────────────────────────────
-        core.setOutput('scan-id', scanIds[0]);
-        core.setOutput('scan-ids', scanIds.join(','));
+        const projectVersionId = versionIdInput || parseUploadIds(upload.stdout).versionId;
+        if (!projectVersionId) {
+            throw new Error(`Could not read the version ID from fs-cli ${args[0]} output. ` +
+                `Pass version-id to bind the upload to a known version.`);
+        }
         core.setOutput('version-id', projectVersionId);
         core.exportVariable('FINITE_STATE_VERSION_ID', projectVersionId);
-        core.info(`Uploaded ${scanIds.length} scan(s) to version ${projectVersionId}`);
-        // ── Poll or submit ───────────────────────────────────────────────────────
-        if (waitForCompletion) {
-            const timeoutMs = timeoutSecs * 1000;
-            const scan = await client.pollScanCompletion(projectVersionId, timeoutMs, 15_000);
-            core.setOutput('scan-status', scan.status);
-            core.info(`Scan completed with status: ${scan.status}`);
-        }
-        else {
+        if (!waitForCompletion) {
             core.setOutput('scan-status', 'SUBMITTED');
-            core.info('Scan submitted. Polling skipped (wait-for-completion=false).');
+            core.info('Upload complete. Polling skipped (wait-for-completion=false).');
+            return;
         }
+        // ── Wait for the scans via fs-cli query ──────────────────────────────────
+        // --fail-on-scan-incomplete keeps the old API-polling semantics: a poll
+        // timeout, a failed scan, or a version with no scans at all fails the step.
+        const query = await runFsCli(fsCli, [
+            'query',
+            '--type',
+            'scan',
+            '--format',
+            'json',
+            '--endpoint',
+            endpoint,
+            '--version-id',
+            projectVersionId,
+            '--wait',
+            '--poll-timeout',
+            String(timeoutMinutes),
+            '--fail-on-scan-incomplete',
+        ], ctx.apiToken);
+        const status = summarizeStatus(parseJsonBlock(query.stdout));
+        core.setOutput('scan-status', status);
+        if (query.exitCode !== 0) {
+            // fs-cli already printed why (scans failed, still running, or none
+            // found); surface it as a step failure, as the API polling path did.
+            throw new Error(`fs-cli query reported scan status ${status} (exit code ${query.exitCode}) for version ${projectVersionId}.`);
+        }
+        core.info(`Scan completed with status: ${status}`);
     }
     catch (err) {
         core.setFailed(err instanceof Error ? err.message : String(err));
