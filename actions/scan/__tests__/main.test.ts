@@ -69,23 +69,43 @@ describe('scan action', () => {
       '/usr/local/bin/fs-cli',
       [
         'scan',
-        '.',
-        '--token',
-        'test-token',
         '--endpoint',
         'https://app.finitestate.io',
-        '--version',
-        'v1.0.0',
+        '--token',
+        'test-token',
         '--name',
         'my-project',
+        '--version',
+        'v1.0.0',
         '--project-id',
         'proj-123',
+        '.',
       ],
       { ignoreReturnCode: true },
     )
 
     expect(core.setOutput).toHaveBeenCalledWith('exit-code', '0')
     expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('puts the scan target last, after flags and extra-args', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        dir: 'firmware/build',
+        'project-id': '',
+        version: 'v1.0.0',
+        name: 'my-project',
+        'extra-args': '--verbose --skip-upload',
+      }
+      return inputs[name] ?? ''
+    })
+
+    await run()
+
+    const args = mockExec.mock.calls[0][1] as string[]
+    expect(args[0]).toBe('scan')
+    expect(args[args.length - 1]).toBe('firmware/build')
+    expect(args.slice(-3)).toEqual(['--verbose', '--skip-upload', 'firmware/build'])
   })
 
   it('fails when fs-cli returns non-zero exit code', async () => {

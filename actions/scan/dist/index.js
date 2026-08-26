@@ -26716,17 +26716,18 @@ async function run() {
             throw new Error('name is required. Set it via the name input or ensure GITHUB_REPOSITORY is available.');
         }
         // ── Build fs-cli args ────────────────────────────────────────────────────
+        // Flags first, scan target last — fs-cli expects the path as the final
+        // positional argument.
         const args = [
             'scan',
-            dir,
-            '--token',
-            ctx.apiToken,
             '--endpoint',
             `https://${ctx.domain}`,
-            '--version',
-            version,
+            '--token',
+            ctx.apiToken,
             '--name',
             name,
+            '--version',
+            version,
         ];
         if (ctx.projectId) {
             args.push('--project-id', ctx.projectId);
@@ -26735,6 +26736,7 @@ async function run() {
             const extra = extraArgs.split(/\s+/).filter(Boolean);
             args.push(...extra);
         }
+        args.push(dir);
         // ── Ensure fs-cli is available ───────────────────────────────────────────
         // Installed by setup in the usual chained workflow; downloaded here when
         // scan runs standalone.

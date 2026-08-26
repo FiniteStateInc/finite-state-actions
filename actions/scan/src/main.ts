@@ -35,17 +35,18 @@ export async function run(): Promise<void> {
     }
 
     // ── Build fs-cli args ────────────────────────────────────────────────────
+    // Flags first, scan target last — fs-cli expects the path as the final
+    // positional argument.
     const args: string[] = [
       'scan',
-      dir,
-      '--token',
-      ctx.apiToken,
       '--endpoint',
       `https://${ctx.domain}`,
-      '--version',
-      version,
+      '--token',
+      ctx.apiToken,
       '--name',
       name,
+      '--version',
+      version,
     ]
 
     if (ctx.projectId) {
@@ -56,6 +57,8 @@ export async function run(): Promise<void> {
       const extra = extraArgs.split(/\s+/).filter(Boolean)
       args.push(...extra)
     }
+
+    args.push(dir)
 
     // ── Ensure fs-cli is available ───────────────────────────────────────────
     // Installed by setup in the usual chained workflow; downloaded here when

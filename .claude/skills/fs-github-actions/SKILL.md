@@ -105,6 +105,7 @@ Runs `fs-cli scan` to analyze project dependencies and upload results to the Fin
 - **`--name` is always sent, even with a project ID.** `fs-cli` requires it. If the `name` input is empty and `GITHUB_REPOSITORY` is unset (act, self-hosted shims, reusable-workflow edge cases), the action fails fast with `name is required`.
 - **`name` resolution order is `name` input → `FINITE_STATE_PROJECT_NAME` from setup's `project-name` → repo name.** The repo-name fallback is the bare name, not `owner/repo`.
 - **`project-id` is forwarded verbatim to `fs-cli --project-id`.** Pass a UUID. To target a project by name, set `project-name` on `setup` (which resolves it to an ID) rather than putting a name here.
+- **Invocation order is `fs-cli scan --endpoint … --token … --name … --version …`, then `--project-id` and any `extra-args`, with the scan target path last.**
 - **`extra-args` is split on whitespace.** There is no shell-style quoting, so an argument containing a space becomes two arguments. Pass such values through a dedicated input or a config file instead.
 - **The step fails on any non-zero `fs-cli` exit, but `exit-code` is still set.** Use `continue-on-error: true` plus `steps.<id>.outputs.exit-code` when you want to inspect the code rather than fail the job.
 
