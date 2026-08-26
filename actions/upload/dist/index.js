@@ -26420,26 +26420,35 @@ function sniffBinaryTarget(bytes) {
     if (bytes.length > 0x14 && bytes.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) {
         return { os: 'linux', arch: ELF_MACHINES[bytes.readUInt16LE(0x12)] };
     }
-    // Mach-O: 64-bit little-endian thin binary carries cputype at offset 4.
+    // Mach-O. A thin binary's magic is MH_MAGIC_64 (0xfeedfacf) in the file's own
+    // byte order, so a native little-endian build reads 0xcffaedfe big-endian —
+    // that is the arm64/x86_64 case, and its cputype is little-endian at offset 4.
+    // The byte-swapped magics are the same header written big-endian, so read
+    // cputype big-endian there rather than giving up on the architecture.
     if (bytes.length > 8) {
         const magic = bytes.readUInt32BE(0);
         if (magic === 0xcffaedfe || magic === 0xcefaedfe) {
             return { os: 'darwin', arch: MACHO_CPUS[bytes.readUInt32LE(4)] };
         }
-        // Big-endian thin and universal ("fat") binaries: OS is certain, the
-        // architecture is not one value.
-        if (magic === 0xfeedfacf || magic === 0xfeedface || magic === 0xcafebabe) {
+        if (magic === 0xfeedfacf || magic === 0xfeedface) {
+            return { os: 'darwin', arch: MACHO_CPUS[bytes.readUInt32BE(4)] };
+        }
+        // A universal ("fat") binary carries several architectures, so there is no
+        // single value to check — the OS is still certain.
+        if (magic === 0xcafebabe || magic === 0xbebafeca) {
             return { os: 'darwin' };
         }
     }
-    // PE: 'MZ', then the PE header offset as a little-endian u32 at 0x3c.
+    // PE: 'MZ', then the PE header offset as a little-endian u32 at 0x3c. A file
+    // with the DOS stub but no PE signature is truncated or not an executable, so
+    // it is rejected rather than accepted with an unchecked architecture.
     if (bytes.length > 0x40 && bytes[0] === 0x4d && bytes[1] === 0x5a) {
         const peOffset = bytes.readUInt32LE(0x3c);
         if (bytes.length > peOffset + 6 &&
             bytes.subarray(peOffset, peOffset + 4).equals(Buffer.from([0x50, 0x45, 0x00, 0x00]))) {
             return { os: 'windows', arch: PE_MACHINES[bytes.readUInt16LE(peOffset + 4)] };
         }
-        return { os: 'windows' };
+        return undefined;
     }
     return undefined;
 }
@@ -26455,23 +26464,43 @@ function describeNonBinary(bytes) {
     return `the response is ${bytes.length} bytes and matches no known executable format`;
 }
 /**
- * Fails unless `bytes` is an executable built for the runner we are installing
- * on. An architecture the header does not pin down is accepted — the platform
- * selected it from the os/arch we asked for.
+ * Returns the reason `bytes` is not an executable built for `osName`/`archName`,
+ * or undefined when it is. Only a universal Mach-O is allowed to leave the
+ * architecture unverified, since it carries several; every other header either
+ * names an architecture we recognise or is rejected.
  */
-function assertBinaryMatchesRunner(bytes, osName, archName) {
+function binaryMismatchReason(bytes, osName, archName) {
     const target = sniffBinaryTarget(bytes);
     if (!target) {
-        throw new Error(`The fs-cli download for ${osName}/${archName} is not an executable: ` +
-            `${describeNonBinary(bytes)}.`);
+        return `it is not an executable: ${describeNonBinary(bytes)}`;
     }
     if (target.os !== osName) {
-        throw new Error(`The fs-cli download for ${osName}/${archName} is a ${target.os} binary. ` +
-            `Refusing to install it on a ${osName} runner.`);
+        return `it is a ${target.os} binary, not ${osName}`;
     }
-    if (target.arch && target.arch !== archName) {
-        throw new Error(`The fs-cli download for ${osName}/${archName} is built for ${target.arch}. ` +
-            `Refusing to install it on an ${archName} runner.`);
+    if (target.arch === undefined) {
+        // Only the fat Mach-O path reaches here; anything else means a machine
+        // value we do not know, which is exactly the mismatch worth catching.
+        if (target.os === 'darwin' && bytes.length > 4) {
+            const magic = bytes.readUInt32BE(0);
+            if (magic === 0xcafebabe || magic === 0xbebafeca) {
+                return undefined;
+            }
+        }
+        return `its header names an architecture this action does not recognise, so it cannot be confirmed as ${archName}`;
+    }
+    if (target.arch !== archName) {
+        return `it is built for ${target.arch}, not ${archName}`;
+    }
+    return undefined;
+}
+/**
+ * Fails unless `bytes` is an executable built for the runner we are installing on.
+ */
+function assertBinaryMatchesRunner(bytes, osName, archName) {
+    const reason = binaryMismatchReason(bytes, osName, archName);
+    if (reason) {
+        throw new Error(`The fs-cli download for ${osName}/${archName} cannot be installed on this ` +
+            `${osName}/${archName} runner: ${reason}.`);
     }
 }
 /**
@@ -26490,6 +26519,9 @@ async function installFsCli(client) {
     }
     const download = await client.getCliDownloadUrl(osName, archName);
     const { download_url: downloadUrl, version } = download;
+    if (!downloadUrl) {
+        throw new Error(`The platform returned no download URL for fs-cli on ${osName}/${archName}.`);
+    }
     core.info(`Requesting fs-cli ${version ?? 'latest'} for ${osName}/${archName} ` +
         `(runner: ${process.platform}/${process.arch})`);
     const response = await fetch(downloadUrl);
@@ -26508,6 +26540,21 @@ async function installFsCli(client) {
     core.addPath(installDir);
     core.info(`Installed fs-cli ${version ?? ''} (${osName}/${archName}) to ${binary}`.trim());
     return binary;
+}
+/**
+ * Reads enough of a file's head to identify its executable format. 8 KB covers
+ * the ELF and Mach-O headers outright and every realistic PE header offset.
+ */
+async function readHeader(file) {
+    const handle = await fs.open(file, 'r');
+    try {
+        const buffer = Buffer.alloc(8192);
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        return buffer.subarray(0, bytesRead);
+    }
+    finally {
+        await handle.close();
+    }
 }
 /**
  * Returns the path to `binary` if it is executable on PATH, else undefined.
@@ -26537,10 +26584,36 @@ async function findOnPath(binary) {
 async function ensureFsCli(client) {
     const existing = await findOnPath('fs-cli');
     if (existing) {
-        core.info(`Using fs-cli already on PATH: ${existing}`);
-        return existing;
+        // An fs-cli on PATH is normally the one `setup` installed, but it can also
+        // be a stale or foreign binary — check it against this runner rather than
+        // trusting the name, and download a correct one when it does not match.
+        const reason = await inspectExistingFsCli(existing);
+        if (!reason) {
+            core.info(`Using fs-cli already on PATH: ${existing}`);
+            return existing;
+        }
+        core.warning(`Ignoring the fs-cli on PATH at ${existing}: ${reason}. Downloading one for this runner.`);
     }
     return installFsCli(client);
+}
+/**
+ * Returns why the fs-cli at `file` is unusable on this runner, or undefined when
+ * it looks right. An unreadable file is reported rather than thrown, so a bad
+ * PATH entry falls back to a download instead of failing the step.
+ */
+async function inspectExistingFsCli(file) {
+    const osName = OS_NAMES[process.platform];
+    const archName = ARCH_NAMES[process.arch];
+    if (!osName || !archName) {
+        // installFsCli reports the unsupported runner with a better message.
+        return undefined;
+    }
+    try {
+        return binaryMismatchReason(await readHeader(file), osName, archName);
+    }
+    catch (err) {
+        return `it could not be read (${err instanceof Error ? err.message : String(err)})`;
+    }
 }
 //# sourceMappingURL=install-cli.js.map
 
@@ -26803,6 +26876,27 @@ const core_1 = __nccwpck_require__(2950);
 // ── Scan-type routing ─────────────────────────────────────────────────────────
 /** Types fs-cli's `upload` subcommand handles, in its own naming. */
 const BINARY_TYPES = new Set(['sca', 'sast', 'config', 'vulnerability_analysis']);
+/** SBOM formats fs-cli accepts, keyed by the aliases this action documents. */
+const SBOM_FORMATS = {
+    cdx: 'cyclonedx',
+    cyclonedx: 'cyclonedx',
+    spdx: 'spdx',
+};
+/**
+ * Maps the `sbom-format` input to fs-cli's `--format`, or to nothing at all when
+ * it was not set — fs-cli then detects the format from the file's contents.
+ */
+function sbomFormatArgs(sbomFormat) {
+    if (!sbomFormat) {
+        return [];
+    }
+    const format = SBOM_FORMATS[sbomFormat.trim().toLowerCase()];
+    if (!format) {
+        throw new Error(`sbom-format "${sbomFormat}" is not recognized. Valid: cdx (cyclonedx) or spdx. ` +
+            `Leave it unset to let fs-cli detect the format.`);
+    }
+    return ['--format', format];
+}
 /** Our inputs use hyphens; fs-cli uses underscores. */
 function normalizeType(type) {
     return type.trim().replace(/-/g, '_');
@@ -26894,6 +26988,10 @@ function buildFsCliArgs(opts) {
     const { types, file, locator } = opts;
     // Omitted when the caller set no timeout, leaving fs-cli its own default.
     const timeout = opts.timeoutMinutes ? ['--timeout', String(opts.timeoutMinutes)] : [];
+    if (types.length === 0) {
+        throw new Error('type is empty. Provide at least one of: sca, sast, config, vulnerability-analysis, ' +
+            'sbom, third-party.');
+    }
     const binary = types.filter((t) => BINARY_TYPES.has(t));
     const special = types.filter((t) => !BINARY_TYPES.has(t));
     if (binary.length && special.length) {
@@ -26906,9 +27004,10 @@ function buildFsCliArgs(opts) {
     if (special.length === 1) {
         const type = special[0];
         if (type === 'sbom') {
-            const format = opts.sbomFormat === 'spdx' ? 'spdx' : 'cyclonedx';
-            // `import` has no --timeout of its own.
-            return ['import', file, ...locator, '--format', format];
+            // fs-cli auto-detects the format from the file when --format is omitted,
+            // so only pass it when the caller actually asked for one. `import` has no
+            // --timeout of its own.
+            return ['import', file, ...locator, ...sbomFormatArgs(opts.sbomFormat)];
         }
         if (type === 'third_party') {
             if (!opts.scannerType) {
@@ -26942,10 +27041,21 @@ async function run() {
         const waitForCompletion = core.getBooleanInput('wait-for-completion');
         // timeout is optional: unset means fs-cli's own defaults (30 minutes for
         // the upload, 30 for the scan poll) rather than a bound we invented.
-        const timeoutInput = core.getInput('timeout');
+        const timeoutInput = core.getInput('timeout').trim();
+        // Deliberately strict: parseInt would read "600s" as 600 and "10 minutes"
+        // as 10, quietly applying a bound the caller did not ask for.
+        if (timeoutInput && !/^\d+$/.test(timeoutInput)) {
+            throw new Error(`timeout must be a whole number of seconds, got "${timeoutInput}". ` +
+                `Leave it unset to use fs-cli's own defaults.`);
+        }
         const timeoutSecs = timeoutInput ? parseInt(timeoutInput, 10) : undefined;
-        if (timeoutSecs !== undefined && (Number.isNaN(timeoutSecs) || timeoutSecs <= 0)) {
+        if (timeoutSecs !== undefined && timeoutSecs <= 0) {
             throw new Error(`timeout must be a positive number of seconds, got "${timeoutInput}".`);
+        }
+        // fs-cli takes whole minutes, so a sub-minute request rounds up to one —
+        // warn rather than silently waiting longer than asked.
+        if (timeoutSecs !== undefined && timeoutSecs < 60) {
+            core.warning(`timeout ${timeoutSecs}s is below the one-minute granularity fs-cli accepts; using 1 minute.`);
         }
         const timeoutMinutes = timeoutSecs ? Math.max(1, Math.ceil(timeoutSecs / 60)) : undefined;
         if (core.getInput('project-type')) {
@@ -26973,7 +27083,13 @@ async function run() {
         // even alongside --project-id because fs-cli validates it before deciding
         // the ID makes it redundant.
         const endpoint = `https://${ctx.domain}`;
-        const name = projectName || ctx.projectId;
+        // fs-cli requires --name even when --project-id makes it redundant for
+        // resolution (config.go: `if c.Name == "" { return "--name is required" }`),
+        // so fall back to the repository name the way the scan action does. Never
+        // pass the project ID here: if a future fs-cli stops ignoring --name under
+        // --project-id, it would find-or-create a project literally named after the
+        // ID.
+        const name = projectName || process.env.GITHUB_REPOSITORY?.split('/').pop() || ctx.projectId;
         const locator = [
             '--endpoint',
             endpoint,
@@ -27027,13 +27143,23 @@ async function run() {
             ...(timeoutMinutes ? ['--poll-timeout', String(timeoutMinutes)] : []),
             '--fail-on-scan-incomplete',
         ], ctx.apiToken);
-        const status = summarizeStatus(parseJsonBlock(query.stdout));
-        core.setOutput('scan-status', status);
+        const result = parseJsonBlock(query.stdout);
         if (query.exitCode !== 0) {
             // fs-cli already printed why (scans failed, still running, or none
             // found); surface it as a step failure, as the API polling path did.
+            const status = summarizeStatus(result);
+            core.setOutput('scan-status', status);
             throw new Error(`fs-cli query reported scan status ${status} (exit code ${query.exitCode}) for version ${projectVersionId}.`);
         }
+        // Exit 0 under --fail-on-scan-incomplete means every scan for the version
+        // settled successfully, so the exit code — not the parsed detail — is what
+        // decides the outcome. Unreadable output must not read as NOT_FOUND.
+        if (!result) {
+            core.warning('fs-cli query exited 0 but its JSON output could not be parsed; reporting COMPLETED ' +
+                'from the exit code.');
+        }
+        const status = result ? summarizeStatus(result) : 'COMPLETED';
+        core.setOutput('scan-status', status);
         core.info(`Scan completed with status: ${status}`);
     }
     catch (err) {

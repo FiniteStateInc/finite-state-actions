@@ -30699,26 +30699,35 @@ function sniffBinaryTarget(bytes) {
     if (bytes.length > 0x14 && bytes.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) {
         return { os: 'linux', arch: ELF_MACHINES[bytes.readUInt16LE(0x12)] };
     }
-    // Mach-O: 64-bit little-endian thin binary carries cputype at offset 4.
+    // Mach-O. A thin binary's magic is MH_MAGIC_64 (0xfeedfacf) in the file's own
+    // byte order, so a native little-endian build reads 0xcffaedfe big-endian —
+    // that is the arm64/x86_64 case, and its cputype is little-endian at offset 4.
+    // The byte-swapped magics are the same header written big-endian, so read
+    // cputype big-endian there rather than giving up on the architecture.
     if (bytes.length > 8) {
         const magic = bytes.readUInt32BE(0);
         if (magic === 0xcffaedfe || magic === 0xcefaedfe) {
             return { os: 'darwin', arch: MACHO_CPUS[bytes.readUInt32LE(4)] };
         }
-        // Big-endian thin and universal ("fat") binaries: OS is certain, the
-        // architecture is not one value.
-        if (magic === 0xfeedfacf || magic === 0xfeedface || magic === 0xcafebabe) {
+        if (magic === 0xfeedfacf || magic === 0xfeedface) {
+            return { os: 'darwin', arch: MACHO_CPUS[bytes.readUInt32BE(4)] };
+        }
+        // A universal ("fat") binary carries several architectures, so there is no
+        // single value to check — the OS is still certain.
+        if (magic === 0xcafebabe || magic === 0xbebafeca) {
             return { os: 'darwin' };
         }
     }
-    // PE: 'MZ', then the PE header offset as a little-endian u32 at 0x3c.
+    // PE: 'MZ', then the PE header offset as a little-endian u32 at 0x3c. A file
+    // with the DOS stub but no PE signature is truncated or not an executable, so
+    // it is rejected rather than accepted with an unchecked architecture.
     if (bytes.length > 0x40 && bytes[0] === 0x4d && bytes[1] === 0x5a) {
         const peOffset = bytes.readUInt32LE(0x3c);
         if (bytes.length > peOffset + 6 &&
             bytes.subarray(peOffset, peOffset + 4).equals(Buffer.from([0x50, 0x45, 0x00, 0x00]))) {
             return { os: 'windows', arch: PE_MACHINES[bytes.readUInt16LE(peOffset + 4)] };
         }
-        return { os: 'windows' };
+        return undefined;
     }
     return undefined;
 }
@@ -30734,23 +30743,43 @@ function describeNonBinary(bytes) {
     return `the response is ${bytes.length} bytes and matches no known executable format`;
 }
 /**
- * Fails unless `bytes` is an executable built for the runner we are installing
- * on. An architecture the header does not pin down is accepted — the platform
- * selected it from the os/arch we asked for.
+ * Returns the reason `bytes` is not an executable built for `osName`/`archName`,
+ * or undefined when it is. Only a universal Mach-O is allowed to leave the
+ * architecture unverified, since it carries several; every other header either
+ * names an architecture we recognise or is rejected.
  */
-function assertBinaryMatchesRunner(bytes, osName, archName) {
+function binaryMismatchReason(bytes, osName, archName) {
     const target = sniffBinaryTarget(bytes);
     if (!target) {
-        throw new Error(`The fs-cli download for ${osName}/${archName} is not an executable: ` +
-            `${describeNonBinary(bytes)}.`);
+        return `it is not an executable: ${describeNonBinary(bytes)}`;
     }
     if (target.os !== osName) {
-        throw new Error(`The fs-cli download for ${osName}/${archName} is a ${target.os} binary. ` +
-            `Refusing to install it on a ${osName} runner.`);
+        return `it is a ${target.os} binary, not ${osName}`;
     }
-    if (target.arch && target.arch !== archName) {
-        throw new Error(`The fs-cli download for ${osName}/${archName} is built for ${target.arch}. ` +
-            `Refusing to install it on an ${archName} runner.`);
+    if (target.arch === undefined) {
+        // Only the fat Mach-O path reaches here; anything else means a machine
+        // value we do not know, which is exactly the mismatch worth catching.
+        if (target.os === 'darwin' && bytes.length > 4) {
+            const magic = bytes.readUInt32BE(0);
+            if (magic === 0xcafebabe || magic === 0xbebafeca) {
+                return undefined;
+            }
+        }
+        return `its header names an architecture this action does not recognise, so it cannot be confirmed as ${archName}`;
+    }
+    if (target.arch !== archName) {
+        return `it is built for ${target.arch}, not ${archName}`;
+    }
+    return undefined;
+}
+/**
+ * Fails unless `bytes` is an executable built for the runner we are installing on.
+ */
+function assertBinaryMatchesRunner(bytes, osName, archName) {
+    const reason = binaryMismatchReason(bytes, osName, archName);
+    if (reason) {
+        throw new Error(`The fs-cli download for ${osName}/${archName} cannot be installed on this ` +
+            `${osName}/${archName} runner: ${reason}.`);
     }
 }
 /**
@@ -30769,6 +30798,9 @@ async function installFsCli(client) {
     }
     const download = await client.getCliDownloadUrl(osName, archName);
     const { download_url: downloadUrl, version } = download;
+    if (!downloadUrl) {
+        throw new Error(`The platform returned no download URL for fs-cli on ${osName}/${archName}.`);
+    }
     core.info(`Requesting fs-cli ${version ?? 'latest'} for ${osName}/${archName} ` +
         `(runner: ${process.platform}/${process.arch})`);
     const response = await fetch(downloadUrl);
@@ -30787,6 +30819,21 @@ async function installFsCli(client) {
     core.addPath(installDir);
     core.info(`Installed fs-cli ${version ?? ''} (${osName}/${archName}) to ${binary}`.trim());
     return binary;
+}
+/**
+ * Reads enough of a file's head to identify its executable format. 8 KB covers
+ * the ELF and Mach-O headers outright and every realistic PE header offset.
+ */
+async function readHeader(file) {
+    const handle = await fs.open(file, 'r');
+    try {
+        const buffer = Buffer.alloc(8192);
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        return buffer.subarray(0, bytesRead);
+    }
+    finally {
+        await handle.close();
+    }
 }
 /**
  * Returns the path to `binary` if it is executable on PATH, else undefined.
@@ -30816,10 +30863,36 @@ async function findOnPath(binary) {
 async function ensureFsCli(client) {
     const existing = await findOnPath('fs-cli');
     if (existing) {
-        core.info(`Using fs-cli already on PATH: ${existing}`);
-        return existing;
+        // An fs-cli on PATH is normally the one `setup` installed, but it can also
+        // be a stale or foreign binary — check it against this runner rather than
+        // trusting the name, and download a correct one when it does not match.
+        const reason = await inspectExistingFsCli(existing);
+        if (!reason) {
+            core.info(`Using fs-cli already on PATH: ${existing}`);
+            return existing;
+        }
+        core.warning(`Ignoring the fs-cli on PATH at ${existing}: ${reason}. Downloading one for this runner.`);
     }
     return installFsCli(client);
+}
+/**
+ * Returns why the fs-cli at `file` is unusable on this runner, or undefined when
+ * it looks right. An unreadable file is reported rather than thrown, so a bad
+ * PATH entry falls back to a download instead of failing the step.
+ */
+async function inspectExistingFsCli(file) {
+    const osName = OS_NAMES[process.platform];
+    const archName = ARCH_NAMES[process.arch];
+    if (!osName || !archName) {
+        // installFsCli reports the unsupported runner with a better message.
+        return undefined;
+    }
+    try {
+        return binaryMismatchReason(await readHeader(file), osName, archName);
+    }
+    catch (err) {
+        return `it could not be read (${err instanceof Error ? err.message : String(err)})`;
+    }
 }
 //# sourceMappingURL=install-cli.js.map
 

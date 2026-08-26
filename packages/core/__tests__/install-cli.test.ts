@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 vi.mock('@actions/core', () => ({
   addPath: vi.fn(),
   info: vi.fn(),
+  warning: vi.fn(),
 }))
 
 // ── Mock node:fs/promises ──────────────────────────────────────────────────────
@@ -14,12 +15,14 @@ const mockWriteFile = vi.fn()
 const mockChmod = vi.fn()
 
 const mockAccess = vi.fn()
+const mockOpen = vi.fn()
 
 vi.mock('node:fs/promises', () => ({
   mkdir: (...args: unknown[]) => mockMkdir(...args),
   writeFile: (...args: unknown[]) => mockWriteFile(...args),
   chmod: (...args: unknown[]) => mockChmod(...args),
   access: (...args: unknown[]) => mockAccess(...args),
+  open: (...args: unknown[]) => mockOpen(...args),
 }))
 
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
@@ -63,6 +66,17 @@ function makeClient(downloadUrl = 'https://cdn.example.com/fs-cli?sig=abc', vers
   return {
     getCliDownloadUrl: vi.fn().mockResolvedValue({ download_url: downloadUrl, version }),
   } as unknown as FsClient & { getCliDownloadUrl: ReturnType<typeof vi.fn> }
+}
+
+/** Makes `fs.open` serve `bytes` as the head of any file that is opened. */
+function onDisk(bytes: Uint8Array): void {
+  mockOpen.mockResolvedValue({
+    read: async (buffer: Buffer) => {
+      Buffer.from(bytes).copy(buffer)
+      return { bytesRead: bytes.length }
+    },
+    close: async () => undefined,
+  })
 }
 
 /** Points the stubbed fetch at a specific payload. */
@@ -169,6 +183,46 @@ describe('installFsCli', () => {
     expect(mockWriteFile).not.toHaveBeenCalled()
   })
 
+  it('verifies the architecture of a byte-swapped Mach-O rather than skipping it', async () => {
+    stubPlatform('darwin', 'arm64')
+    const swapped = Buffer.alloc(64)
+    swapped.writeUInt32BE(0xfeedfacf, 0)
+    swapped.writeUInt32BE(0x01000007, 4) // amd64, on an arm64 runner
+    serve(swapped)
+
+    await expect(installFsCli(makeClient())).rejects.toThrow(/built for amd64/)
+  })
+
+  it('rejects an unrecognised machine value instead of accepting it unchecked', async () => {
+    stubPlatform('linux', 'x64')
+    serve(elf(0xf3)) // riscv
+
+    await expect(installFsCli(makeClient())).rejects.toThrow(/does not recognise/)
+    expect(mockWriteFile).not.toHaveBeenCalled()
+  })
+
+  it('rejects a DOS stub with no PE signature', async () => {
+    stubPlatform('win32', 'x64')
+    const stub = Buffer.alloc(128)
+    stub[0] = 0x4d
+    stub[1] = 0x5a
+    stub.writeUInt32LE(0x40, 0x3c) // points at zeroes, not 'PE\0\0'
+    serve(stub)
+
+    await expect(installFsCli(makeClient())).rejects.toThrow(/not an executable/)
+    expect(mockWriteFile).not.toHaveBeenCalled()
+  })
+
+  it('fails when the platform returns no download URL', async () => {
+    stubPlatform('linux', 'x64')
+    const client = {
+      getCliDownloadUrl: vi.fn().mockResolvedValue({ version: 'v2.3.30' }),
+    } as unknown as FsClient
+
+    await expect(installFsCli(client)).rejects.toThrow(/no download URL/)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   it('accepts a universal macOS binary, which pins no single architecture', async () => {
     stubPlatform('darwin', 'arm64')
     const fat = Buffer.alloc(64)
@@ -207,11 +261,12 @@ describe('ensureFsCli', () => {
     delete process.env.RUNNER_TEMP
   })
 
-  it('reuses an fs-cli already on PATH without downloading', async () => {
+  it('reuses an fs-cli already on PATH when it matches the runner', async () => {
     stubPlatform('linux', 'x64')
     mockAccess.mockImplementation(async (candidate: string) => {
       if (candidate !== '/usr/local/bin/fs-cli') throw new Error('ENOENT')
     })
+    onDisk(elf())
     const client = makeClient()
 
     const binary = await ensureFsCli(client)
@@ -219,6 +274,37 @@ describe('ensureFsCli', () => {
     expect(binary).toBe('/usr/local/bin/fs-cli')
     expect(client.getCliDownloadUrl).not.toHaveBeenCalled()
     expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('replaces an fs-cli on PATH that was built for another platform', async () => {
+    stubPlatform('linux', 'x64')
+    mockAccess.mockImplementation(async (candidate: string) => {
+      if (candidate !== '/usr/local/bin/fs-cli') throw new Error('ENOENT')
+    })
+    onDisk(pe())
+    const client = makeClient()
+
+    const binary = await ensureFsCli(client)
+
+    expect(core.warning).toHaveBeenCalledWith(
+      expect.stringContaining('Ignoring the fs-cli on PATH'),
+    )
+    expect(client.getCliDownloadUrl).toHaveBeenCalledWith('linux', 'amd64')
+    expect(binary).toBe('/runner/temp/fs-cli/fs-cli')
+  })
+
+  it('downloads when an fs-cli on PATH cannot be read', async () => {
+    stubPlatform('linux', 'x64')
+    mockAccess.mockImplementation(async (candidate: string) => {
+      if (candidate !== '/usr/local/bin/fs-cli') throw new Error('ENOENT')
+    })
+    mockOpen.mockRejectedValue(new Error('EACCES'))
+    const client = makeClient()
+
+    const binary = await ensureFsCli(client)
+
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('could not be read'))
+    expect(binary).toBe('/runner/temp/fs-cli/fs-cli')
   })
 
   it('downloads fs-cli when PATH has none', async () => {

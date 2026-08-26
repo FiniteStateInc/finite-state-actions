@@ -6,3 +6,6 @@ dist/
 .env
 .DS_Store
 coverage/
+
+# multi-reviewer session state
+.multi-reviewer/
