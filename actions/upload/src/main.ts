@@ -356,7 +356,9 @@ export async function run(): Promise<void> {
     // project ID is never used here: if a future fs-cli stops ignoring --name
     // under --project-id, it would find-or-create a project literally named
     // after the ID.
-    const name = projectName || process.env.GITHUB_REPOSITORY?.split('/').pop()
+    const repository = process.env.GITHUB_REPOSITORY ?? ''
+    const repositoryName = repository.split('/').pop() || undefined
+    const name = projectName || repositoryName
     if (!name) {
       throw new Error(
         'A project name is required: fs-cli needs --name even when project-id is set. ' +
