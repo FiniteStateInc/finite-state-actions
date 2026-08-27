@@ -84,6 +84,11 @@ describe('run-report action', () => {
         recipe: 'Triage Prioritization',
         'project-id': '',
         'version-id': '',
+        folder: '',
+        component: '',
+        'data-file': '',
+        left: '',
+        right: '',
         'baseline-version': '',
         'current-version': '',
         period: '30d',
@@ -131,6 +136,10 @@ describe('run-report action', () => {
         '1',
         '--recipe',
         'Triage Prioritization',
+        '--project',
+        'proj-123',
+        '--version',
+        'ver-456',
         '--period',
         '30d',
         '--open-only',
@@ -147,6 +156,11 @@ describe('run-report action', () => {
         recipe: 'Triage Prioritization',
         'project-id': '',
         'version-id': '',
+        folder: '',
+        component: '',
+        'data-file': '',
+        left: '',
+        right: '',
         'baseline-version': '',
         'current-version': '',
         period: '',
@@ -188,6 +202,11 @@ describe('run-report action', () => {
         recipe: 'Triage Prioritization, Version Comparison, Executive Summary',
         'project-id': '',
         'version-id': '',
+        folder: '',
+        component: '',
+        'data-file': '',
+        left: '',
+        right: '',
         'baseline-version': '',
         'current-version': '',
         period: '',
@@ -222,6 +241,97 @@ describe('run-report action', () => {
     expect(args).toContain('Version Comparison')
     expect(args).toContain('Executive Summary')
 
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('scopes with --project/--version, the flags fs-report run actually defines', async () => {
+    await run()
+
+    const args = vi.mocked(exec.exec).mock.calls.find((c) => c[0] === 'fs-report')![1] as string[]
+
+    expect(args).not.toContain('--project-id')
+    expect(args).not.toContain('--version-id')
+  })
+
+  it('runs the compare subcommand when left and right scopes are set', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        recipe: 'Component Diff',
+        left: 'project:BN85@v3.2.1',
+        right: 'project:BN85@v3.3.0',
+        'output-dir': './fs-reports',
+        'cache-ttl': '1',
+      }
+      return inputs[name] ?? ''
+    })
+    vi.mocked(core.getBooleanInput).mockImplementation(() => false)
+
+    await run()
+
+    const args = vi.mocked(exec.exec).mock.calls.find((c) => c[0] === 'fs-report')![1] as string[]
+
+    expect(args.slice(0, 6)).toEqual([
+      'compare',
+      'Component Diff',
+      '--left',
+      'project:BN85@v3.2.1',
+      '--right',
+      'project:BN85@v3.3.0',
+    ])
+    // `compare` rejects the run-only flags, so none of them may leak through.
+    expect(args).not.toContain('--headless')
+    expect(args).not.toContain('--recipe')
+    expect(args).not.toContain('--cache-ttl')
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('fails when only one side of a comparison scope is given', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        recipe: 'Component Diff',
+        left: 'project:BN85@v3.2.1',
+        'output-dir': './fs-reports',
+        'cache-ttl': '1',
+      }
+      return inputs[name] ?? ''
+    })
+    vi.mocked(core.getBooleanInput).mockImplementation(() => false)
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(
+      "Comparison reports need both 'left' and 'right' scope references",
+    )
+  })
+
+  it('passes the recipe-specific scope flags through', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        recipe: 'Component Impact,Assessment Overview,Exploitability Report',
+        folder: 'Gateways',
+        component: 'openssl',
+        'data-file': './evidence.json',
+        'output-dir': './fs-reports',
+        'cache-ttl': '1',
+      }
+      return inputs[name] ?? ''
+    })
+    vi.mocked(core.getBooleanInput).mockImplementation(() => false)
+
+    await run()
+
+    const args = vi.mocked(exec.exec).mock.calls.find((c) => c[0] === 'fs-report')![1] as string[]
+
+    expect(args).toEqual(
+      expect.arrayContaining([
+        '--folder',
+        'Gateways',
+        '--component',
+        'openssl',
+        '--data-file',
+        './evidence.json',
+      ]),
+    )
     expect(core.setFailed).not.toHaveBeenCalled()
   })
 })

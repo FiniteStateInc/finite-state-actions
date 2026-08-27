@@ -213,52 +213,100 @@ Wraps `fs-report` as the findings/reporting engine. Installs fs-report, runs rec
 
 **Inputs:**
 
-| Input               | Required | Default        | Description                                             |
-| ------------------- | -------- | -------------- | ------------------------------------------------------- |
-| `recipe`            | yes      | —              | Recipe name(s), comma-separated                         |
-| `project-id`        | no       | from setup     | Falls back to setup context                             |
-| `version-id`        | no       | —              | Pin to specific version                                 |
-| `baseline-version`  | no       | —              | For Version Comparison recipe                           |
-| `current-version`   | no       | —              | For Version Comparison recipe                           |
-| `period`            | no       | —              | Time period, e.g. `30d`, `1m`                           |
-| `cve`               | no       | —              | CVE ID(s) for CVE Impact recipe                         |
-| `finding-types`     | no       | —              | Filter: `cve`, `sast`, etc.                             |
-| `open-only`         | no       | `true`         | Only include open findings                              |
-| `scoring-file`      | no       | —              | Path to custom scoring YAML for Triage Prioritization   |
-| `ai`                | no       | `false`        | Enable AI analysis (requires AI provider key as secret) |
-| `ai-prompts`        | no       | `false`        | Generate AI prompts without calling AI API              |
-| `output-dir`        | no       | `./fs-reports` | Output directory                                        |
-| `fs-report-version` | no       | latest         | Pin fs-report version                                   |
-| `cache-ttl`         | no       | `1`            | API cache TTL in hours (1h default for CI)              |
-| `extra-args`        | no       | —              | Passthrough for additional fs-report flags              |
+| Input               | Required | Default        | fs-report flag        | Description                                                                        |
+| ------------------- | -------- | -------------- | --------------------- | ---------------------------------------------------------------------------------- |
+| `recipe`            | yes      | —              | `--recipe` (repeated) | Recipe name(s) or slug(s), comma-separated                                         |
+| `project-id`        | no       | from setup     | `--project`           | Project name or ID; falls back to setup context                                    |
+| `version-id`        | no       | from setup     | `--version`           | Version name or ID; falls back to setup context                                    |
+| `folder`            | no       | —              | `--folder`            | Folder name or ID, includes subfolders                                             |
+| `component`         | no       | —              | `--component`         | Required by Component Impact and Component Remediation Package                     |
+| `baseline-version`  | no       | —              | `--baseline-version`  | Version Comparison / Security Progress                                             |
+| `current-version`   | no       | —              | `--current-version`   | Version Comparison / Security Progress                                             |
+| `left`              | no       | —              | `--left`              | Comparison scope ref, e.g. `project:BN85@v3.2.1`. Switches to `fs-report compare`  |
+| `right`             | no       | —              | `--right`             | Comparison scope ref. Required whenever `left` is set                              |
+| `data-file`         | no       | —              | `--data-file`         | forge `exploitability-dataset/v2` export, for the Exploitability Report recipes    |
+| `period`            | no       | —              | `--period`            | Time period, e.g. `30d`, `1m`                                                      |
+| `cve`               | no       | —              | `--cve`               | CVE ID(s); required by CVE Impact                                                  |
+| `finding-types`     | no       | `cve` (CLI)    | `--finding-types`     | `cve`, `sast`, `thirdparty`, `all`, or comma-separated                             |
+| `open-only`         | no       | `true`         | `--open-only`         | Security Progress only. The CLI default is `false`; this action defaults to `true` |
+| `scoring-file`      | no       | —              | `--scoring-file`      | Custom gate/scoring YAML for Triage Prioritization                                 |
+| `ai`                | no       | `false`        | `--ai`                | Enable AI analysis (requires an AI provider key in the job env)                    |
+| `ai-prompts`        | no       | `false`        | `--ai-prompts`        | Generate AI prompts without calling the AI API                                     |
+| `output-dir`        | no       | `./fs-reports` | `--output`            | Output directory                                                                   |
+| `fs-report-version` | no       | latest         | —                     | pipx version spec, e.g. `==2.0.4`                                                  |
+| `cache-ttl`         | no       | `1`            | `--cache-ttl`         | Bare numbers are **hours**; also accepts `30m`, `1h30m`, `1d`                      |
+| `extra-args`        | no       | —              | —                     | Whitespace-split passthrough for any other fs-report flag                          |
+
+Anything not listed above — `--min-severity`, `--scan-type`, `--scan-status`, `--exploit-maturity`, `--include-status`, `--reachable-only`, `--top`, `--triage`, `--theme`, `--logo`, `--standalone` — goes through `extra-args`. It is split on whitespace, so values containing spaces must be quoted at the fs-report level or avoided.
 
 **Outputs:**
 
-| Output           | Description                                               |
-| ---------------- | --------------------------------------------------------- |
-| `report-dir`     | Path to generated reports directory                       |
-| `artifact-name`  | Uploaded workflow artifact name                           |
-| `summary-json`   | JSON string with key metrics extracted from reports       |
-| `critical-count` | Findings in CRITICAL/P0 band (from Triage Prioritization) |
-| `high-count`     | Findings in HIGH/P1 band                                  |
-| `new-findings`   | New findings count (from Version Comparison)              |
-| `fixed-findings` | Fixed findings count (from Version Comparison)            |
+| Output           | Description                                             |
+| ---------------- | ------------------------------------------------------- |
+| `report-dir`     | Path to generated reports directory                     |
+| `artifact-name`  | Uploaded workflow artifact name                         |
+| `summary-json`   | JSON string with key metrics extracted from reports     |
+| `critical-count` | Triage Prioritization CRITICAL band, reported as P0     |
+| `high-count`     | Triage Prioritization HIGH band, reported as P1         |
+| `new-findings`   | New findings, from the Version Comparison churn table   |
+| `fixed-findings` | Fixed findings, from the Version Comparison churn table |
 
-**Behavior:** Installs `fs-report` via `pipx` (cached across runs). Sets auth from setup context. Runs `fs-report run --headless` with specified recipes. Parses CSV/JSON/MD outputs to extract key metrics. Always uploads the full report directory as a workflow artifact.
+**Behavior:** Installs `fs-report` via `pipx install --force` (no caching — the install runs every time). Passes auth to the CLI as `FINITE_STATE_AUTH_TOKEN` / `FINITE_STATE_DOMAIN` in the child env, never in argv. Runs `fs-report run --headless`, or `fs-report compare` when `left`/`right` are set. Always uploads the whole output directory as a workflow artifact, even when nothing parseable was produced.
 
-**Available recipes** (see fs-report-recipes skill for full details):
+**Output layout.** `fs-report` writes one directory per recipe, named after the recipe, with files sharing that base name:
 
-| Recipe                           | Scope                  | Key outputs                                           |
-| -------------------------------- | ---------------------- | ----------------------------------------------------- |
-| Executive Summary                | Portfolio              | HTML overview with severity charts                    |
-| Scan Analysis                    | Portfolio              | Scan throughput, completion rates                     |
-| Triage Prioritization            | Project/Folder         | Priority-banded findings + `vex_recommendations.json` |
-| Version Comparison               | Project                | Delta findings, component churn                       |
-| Remediation Package              | Project                | Component-centric action cards with upgrade paths     |
-| CVE Impact                       | Portfolio (CVE-scoped) | Per-CVE dossier across all projects                   |
-| Findings by Project              | Project/Folder         | Full findings inventory                               |
-| Component List                   | Project/Folder         | SBOM component inventory                              |
-| Component Vulnerability Analysis | Project/Folder         | Components ranked by composite risk                   |
+```
+fs-reports/
+  Triage Prioritization/
+    Triage Prioritization.csv          <- parsed into triageBands
+    Triage Prioritization.html
+    vex_recommendations.json
+  Version Comparison/
+    Version Comparison.csv             <- per-version summary table
+    Version Comparison_Detail_Findings_Churn.csv   <- parsed into versionDelta
+  Findings by Project/
+    Findings by Project.csv            <- parsed into severityCounts
+```
+
+Only those three CSVs feed `summary-json`. Every other recipe still lands in the artifact but contributes nothing to the outputs or to `quality-gate`, so gate a run on a recipe that actually produces one of them. `fs-report` writes no aggregate summary file.
+
+**Available recipes.** `fs-report list recipes` is authoritative; the catalog below is the full bundled set as of fs-report 2.0.x. "Needs" is the action input that must be set, over and above the project/version that `setup` already exports.
+
+| Recipe                            | Needs            | CSV | Notes                                                         |
+| --------------------------------- | ---------------- | --- | ------------------------------------------------------------- |
+| Executive Summary                 | —                | yes | Portfolio posture overview, PDF-capable                       |
+| Executive Dashboard               | —                | yes | KPI dashboard + `_Top_Risk_Products.csv`                      |
+| Findings by Project               | —                | yes | Full findings inventory — the `severityCounts` source         |
+| Triage Prioritization             | —                | yes | Banded findings + `vex_recommendations.json`                  |
+| Version Comparison                | —                | yes | Progression, findings churn, component churn                  |
+| Security Progress                 | —                | yes | Version-over-version resolved/introduced; honours `open-only` |
+| Remediation Package               | project/`folder` | yes | Component action cards with upgrade paths                     |
+| Component List                    | —                | yes | SBOM component inventory                                      |
+| Component Vulnerability Analysis  | —                | yes | Components ranked by composite risk                           |
+| License Report                    | —                | yes | License posture + `_Detail.csv`                               |
+| Configuration Analysis Triage     | —                | yes | Config/credential/crypto findings                             |
+| False Positive Analysis           | —                | yes | Mechanical checks; richer with `ai: true`                     |
+| Reachability VEX Coverage         | —                | yes | Reachability vs VEX coverage gaps                             |
+| CRA Compliance                    | —                | yes | EU CRA triage queue; `--exploit-maturity` via `extra-args`    |
+| Scan Analysis                     | —                | yes | Scan throughput, durations, failures                          |
+| Scan Quality                      | —                | yes | Coverage gaps, staleness + `_Detail.csv`                      |
+| Platform Usage                    | —                | yes | Multi-table: projects, folders, versions, hygiene             |
+| User Activity                     | —                | yes | Login/activity from the audit trail                           |
+| CVE Impact                        | `cve`            | yes | Per-CVE dossier across the portfolio                          |
+| CVE Component Evidence            | project          | yes | CVE-bearing components + firmware file paths                  |
+| Human Readable SBOM               | project          | yes | Reviewer-facing SBOM                                          |
+| Component Impact                  | `component`      | yes | Portfolio blast radius for one component                      |
+| Component Remediation Package     | `component`      | yes | Zero-day upgrade guidance, no CVE required                    |
+| Exploitability Report             | `data-file`      | no  | HTML/PDF from a forge `exploitability-dataset/v2` export      |
+| Exploitability Report (Shareable) | `data-file`      | no  | Redacted external variant of the above                        |
+| Component Diff                    | `left`+`right`   | no  | Comparison — runs via `fs-report compare`, HTML only          |
+| Finding Diff                      | `left`+`right`   | no  | Comparison — fix-sync view                                    |
+| License Diff                      | `left`+`right`   | no  | Comparison — copyleft deltas                                  |
+| Triage Status Diff                | `left`+`right`   | no  | Comparison — diverging VEX decisions                          |
+
+Seven further recipes ship under `fs_report/recipes/forge/` (Assessment Overview, Customer Brief, Customer Brief Detailed, Workflow Summary, and three JSON notification recipes). They are driven by finite-state-forge and are not intended to be called from CI.
+
+**Comparison recipes are a different subcommand.** `fs-report run` rejects them outright — the engine only dispatches them inside a meta-compare bundle. Setting `left` and `right` makes the action call `fs-report compare` instead, which accepts only `--left`, `--right`, `--finding-types` and `--output`; `period`, `cache-ttl`, `ai`, `scoring-file` and the scope inputs are all ignored in that mode.
 
 **Examples:**
 
@@ -278,6 +326,32 @@ Wraps `fs-report` as the findings/reporting engine. Installs fs-report, runs rec
     recipe: 'Triage Prioritization,Version Comparison,Remediation Package'
     period: 30d
     ai: true
+
+# Zero-day triage for a named component, portfolio-wide
+- uses: finite-state/run-report@v2
+  with:
+    recipe: 'Component Impact,Component Remediation Package'
+    component: openssl
+
+# CVE dossier across every project
+- uses: finite-state/run-report@v2
+  with:
+    recipe: 'CVE Impact'
+    cve: CVE-2024-3094
+
+# Comparison report — runs `fs-report compare`
+- uses: finite-state/run-report@v2
+  with:
+    recipe: 'Component Diff,License Diff'
+    left: 'project:BN85@v3.2.1'
+    right: 'project:BN85@v3.3.0'
+
+# A flag with no dedicated input
+- uses: finite-state/run-report@v2
+  with:
+    recipe: 'Findings by Project'
+    folder: Gateways
+    extra-args: '--min-severity HIGH --scan-type SCA --reachable-only'
 ```
 
 ---

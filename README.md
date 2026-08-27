@@ -189,6 +189,42 @@ jobs:
           artifact-name: 'sbom-${{ github.ref_name }}'
 ```
 
+## Reports
+
+`run-report` wraps the `fs-report` CLI. `fs-report list recipes` prints the authoritative catalog; these are the ones worth reaching for from CI, with the extra `run-report` input each one needs on top of the project/version `setup` already exports.
+
+| Recipe                                                                 | Extra input needed  | Feeds `quality-gate` |
+| ---------------------------------------------------------------------- | ------------------- | -------------------- |
+| Triage Prioritization                                                  | —                   | yes                  |
+| Version Comparison                                                     | —                   | yes                  |
+| Findings by Project                                                    | —                   | yes                  |
+| Executive Summary, Executive Dashboard                                 | —                   | no                   |
+| Security Progress, Scan Analysis, Scan Quality, Platform Usage         | —                   | no                   |
+| Component List, Component Vulnerability Analysis, License Report       | —                   | no                   |
+| Configuration Analysis Triage, False Positive Analysis, CRA Compliance | —                   | no                   |
+| Reachability VEX Coverage, User Activity                               | —                   | no                   |
+| Remediation Package                                                    | project or `folder` | no                   |
+| CVE Component Evidence, Human Readable SBOM                            | project             | no                   |
+| CVE Impact                                                             | `cve`               | no                   |
+| Component Impact, Component Remediation Package                        | `component`         | no                   |
+| Exploitability Report, Exploitability Report (Shareable)               | `data-file`         | no                   |
+| Component Diff, Finding Diff, License Diff, Triage Status Diff         | `left` + `right`    | no                   |
+
+Two things to know:
+
+- **Only three recipes populate the step outputs.** `summary-json`, `critical-count`, `high-count`, `new-findings` and `fixed-findings` are parsed from `Triage Prioritization.csv`, `Version Comparison_Detail_Findings_Churn.csv` and `Findings by Project.csv`. Every other recipe still lands in the uploaded artifact, but gating on one of them will always see zeroes.
+- **The diff recipes use a different subcommand.** `fs-report run` refuses them. Setting `left` and `right` makes the action call `fs-report compare` instead, which ignores `period`, `cache-ttl`, `ai`, `scoring-file` and the scope inputs.
+
+Any fs-report flag without a dedicated input — `--min-severity`, `--scan-type`, `--exploit-maturity`, `--top`, `--theme` — goes through `extra-args`:
+
+```yaml
+- uses: FiniteStateInc/finite-state-actions/actions/run-report@v2
+  with:
+    recipe: 'Findings by Project'
+    folder: Gateways
+    extra-args: '--min-severity HIGH --scan-type SCA --reachable-only'
+```
+
 ## Action chaining
 
 Actions pass data via step outputs and environment variables. The `setup` action exports `FINITE_STATE_AUTH_TOKEN` and `FINITE_STATE_DOMAIN` as environment variables for the entire job.

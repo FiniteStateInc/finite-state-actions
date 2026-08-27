@@ -1,5 +1,6 @@
-CVE ID,Component,Severity,Priority Band,Reachable,Has Exploit,In KEV,Attack Vector,EPSS Percentile
-CVE-2024-1234,openssl@3.0.2,CRITICAL,P0,true,true,true,NETWORK,0.97
-CVE-2024-5678,curl@8.1.0,HIGH,P1,true,false,false,NETWORK,0.92
-CVE-2024-9999,busybox@1.36,MEDIUM,P2,false,false,false,LOCAL,0.10
-CVE-2024-0001,zlib@1.2.13,LOW,P3,false,false,false,LOCAL,0.02
+finding_id,severity,risk,priority_band,triage_score,gate_assignment,status,component_name,component_version,project_name,version_name,reachability_label,ai_guidance
+CVE-2024-1234,CRITICAL,95,CRITICAL,100,GATE_1,IN_TRIAGE,openssl,3.0.2,edge-router,v2.1.0,REACHABLE,"Upgrade to 3.0.13, then rebuild the image"
+CVE-2024-5678,HIGH,80,HIGH,85,GATE_2,OPEN,curl,8.1.0,edge-router,v2.1.0,REACHABLE,
+CVE-2024-9999,MEDIUM,40,MEDIUM,NONE,NONE,OPEN,busybox,1.36,edge-router,v2.1.0,UNKNOWN,
+CVE-2024-0001,LOW,10,LOW,NONE,NONE,OPEN,zlib,1.2.13,edge-router,v2.1.0,UNREACHABLE,
+CVE-2024-0002,NONE,0,INFO,NONE,NONE,NOT_AFFECTED,libxml2,2.9.14,edge-router,v2.1.0,UNREACHABLE,
