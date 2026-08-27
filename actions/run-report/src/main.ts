@@ -32,10 +32,15 @@ export async function run(): Promise<void> {
     const recipe = core.getInput('recipe', { required: true })
     const projectIdOverride = core.getInput('project-id') || undefined
     const versionIdOverride = core.getInput('version-id') || undefined
+    const folder = core.getInput('folder') || undefined
     const baselineVersion = core.getInput('baseline-version') || undefined
     const currentVersion = core.getInput('current-version') || undefined
+    const left = core.getInput('left') || undefined
+    const right = core.getInput('right') || undefined
     const period = core.getInput('period') || undefined
     const cve = core.getInput('cve') || undefined
+    const component = core.getInput('component') || undefined
+    const dataFile = core.getInput('data-file') || undefined
     const findingTypes = core.getInput('finding-types') || undefined
     const openOnly = core.getBooleanInput('open-only')
     const scoringFile = core.getInput('scoring-file') || undefined
@@ -62,53 +67,85 @@ export async function run(): Promise<void> {
       ) as Record<string, string>,
     })
 
-    // ── Build fs-report args ─────────────────────────────────────────────────
-    const args: string[] = ['run', '--headless', '--output', outputDir, '--cache-ttl', cacheTtl]
-
-    // Split recipes by comma, add each as --recipe "Name"
+    // Split recipes by comma
     const recipes = recipe
       .split(',')
       .map((r) => r.trim())
       .filter(Boolean)
-    for (const r of recipes) {
-      args.push('--recipe', r)
+
+    // ── Build fs-report args ─────────────────────────────────────────────────
+    // fs-report's comparison recipes (Component Diff, Finding Diff, License
+    // Diff, Triage Status Diff) are rejected by `fs-report run` — the engine
+    // dispatches them only inside a meta-compare bundle, and points at
+    // `fs-report compare <recipe> --left <scope> --right <scope>` instead. The
+    // `compare` subcommand takes a much narrower flag set than `run`, so
+    // supplying left/right selects the whole invocation, not just two flags.
+    const compareMode = Boolean(left || right)
+    if (compareMode && !(left && right)) {
+      throw new Error("Comparison reports need both 'left' and 'right' scope references")
     }
 
-    // Add project/version from context
-    if (ctx.projectId) {
-      args.push('--project-id', ctx.projectId)
-    }
-    if (ctx.versionId) {
-      args.push('--version-id', ctx.versionId)
-    }
+    const args: string[] = compareMode
+      ? ['compare', ...recipes, '--left', left as string, '--right', right as string]
+      : ['run', '--headless', '--cache-ttl', cacheTtl]
+    args.push('--output', outputDir)
 
-    // Optional flags
-    if (period) {
-      args.push('--period', period)
-    }
-    if (cve) {
-      args.push('--cve', cve)
-    }
-    if (findingTypes) {
-      args.push('--finding-types', findingTypes)
-    }
-    if (openOnly) {
-      args.push('--open-only')
-    }
-    if (scoringFile) {
-      args.push('--scoring-file', scoringFile)
-    }
-    if (ai) {
-      args.push('--ai')
-    }
-    if (aiPrompts) {
-      args.push('--ai-prompts')
-    }
-    if (baselineVersion) {
-      args.push('--baseline-version', baselineVersion)
-    }
-    if (currentVersion) {
-      args.push('--current-version', currentVersion)
+    if (compareMode) {
+      // `compare` accepts scopes positionally via --left/--right and shares only
+      // --finding-types with `run`; everything else must go through extra-args.
+      if (findingTypes) {
+        args.push('--finding-types', findingTypes)
+      }
+    } else {
+      for (const r of recipes) {
+        args.push('--recipe', r)
+      }
+
+      // Scope from setup context (or per-step overrides)
+      if (ctx.projectId) {
+        args.push('--project', ctx.projectId)
+      }
+      if (ctx.versionId) {
+        args.push('--version', ctx.versionId)
+      }
+      if (folder) {
+        args.push('--folder', folder)
+      }
+
+      // Optional flags
+      if (period) {
+        args.push('--period', period)
+      }
+      if (cve) {
+        args.push('--cve', cve)
+      }
+      if (component) {
+        args.push('--component', component)
+      }
+      if (dataFile) {
+        args.push('--data-file', dataFile)
+      }
+      if (findingTypes) {
+        args.push('--finding-types', findingTypes)
+      }
+      if (openOnly) {
+        args.push('--open-only')
+      }
+      if (scoringFile) {
+        args.push('--scoring-file', scoringFile)
+      }
+      if (ai) {
+        args.push('--ai')
+      }
+      if (aiPrompts) {
+        args.push('--ai-prompts')
+      }
+      if (baselineVersion) {
+        args.push('--baseline-version', baselineVersion)
+      }
+      if (currentVersion) {
+        args.push('--current-version', currentVersion)
+      }
     }
 
     // Split extra-args by whitespace and append
@@ -118,7 +155,9 @@ export async function run(): Promise<void> {
     }
 
     // ── Run fs-report ────────────────────────────────────────────────────────
-    core.info(`Running fs-report with ${recipes.length} recipe(s): ${recipes.join(', ')}`)
+    core.info(
+      `Running fs-report ${compareMode ? 'compare' : 'run'} with ${recipes.length} recipe(s): ${recipes.join(', ')}`,
+    )
     const baseEnv = Object.fromEntries(
       Object.entries(process.env).filter(([, v]) => v !== undefined),
     ) as Record<string, string>

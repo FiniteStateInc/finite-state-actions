@@ -14,11 +14,29 @@ inputs:
   version-id:
     description: 'Version ID override (falls back to setup context)'
     required: false
+  folder:
+    description: 'Folder name or ID to scope the run to (includes subfolders)'
+    required: false
+  component:
+    description: 'Component name — required by Component Impact and Component Remediation Package'
+    required: false
   baseline-version:
-    description: 'Baseline version ID for comparison recipes'
+    description: 'Baseline version ID or name (Version Comparison, Security Progress)'
     required: false
   current-version:
-    description: 'Current version ID for comparison recipes'
+    description: 'Current version ID or name (Version Comparison, Security Progress)'
+    required: false
+  left:
+    description: >-
+      Left/baseline scope reference for a comparison report, e.g. "project:BN85@v3.2.1".
+      Setting left and right runs `fs-report compare` instead of `fs-report run` — the
+      only way to reach Component Diff, Finding Diff, License Diff and Triage Status Diff.
+    required: false
+  right:
+    description: 'Right/current scope reference for a comparison report. Required with left.'
+    required: false
+  data-file:
+    description: 'Path to a forge exploitability-dataset/v2 export (Exploitability Report recipes)'
     required: false
   period:
     description: 'Time period filter (e.g. 30d, 7d)'
@@ -30,7 +48,9 @@ inputs:
     description: 'Comma-separated finding types to include'
     required: false
   open-only:
-    description: 'Only include open findings'
+    description: >-
+      Count only open findings in Security Progress. Defaults to true here; the
+      fs-report CLI default is false. Inert for every other recipe.
     required: false
     default: 'true'
   scoring-file:
@@ -52,7 +72,7 @@ inputs:
     description: 'Pin fs-report to a specific version (e.g. ==1.2.3)'
     required: false
   cache-ttl:
-    description: 'Cache TTL in days'
+    description: 'API cache TTL — bare numbers are hours; also accepts 30m, 1h30m, 1d'
     required: false
     default: '1'
   extra-args:
@@ -66,13 +86,13 @@ outputs:
   summary-json:
     description: 'JSON string of the parsed ReportSummary'
   critical-count:
-    description: 'Number of P0 (critical triage band) findings'
+    description: "Findings in Triage Prioritization's CRITICAL band (reported as P0)"
   high-count:
-    description: 'Number of P1 (high triage band) findings'
+    description: "Findings in Triage Prioritization's HIGH band (reported as P1)"
   new-findings:
-    description: 'Number of new findings from version delta'
+    description: 'New findings from the Version Comparison findings-churn table'
   fixed-findings:
-    description: 'Number of fixed findings from version delta'
+    description: 'Fixed findings from the Version Comparison findings-churn table'
 runs:
   using: 'node24'
   main: 'dist/index.js'

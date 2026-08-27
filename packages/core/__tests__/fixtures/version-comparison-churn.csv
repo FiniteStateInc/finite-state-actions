@@ -1,0 +1,4 @@
+Project,From Version,To Version,Change Type,ID,Severity,Component Name,Component Version,Score,Title
+edge-router,v2.0.0,v2.1.0,New,CVE-2024-1111,CRITICAL,openssl,3.0.2,9.8,"Buffer overflow in X.509, remote"
+edge-router,v2.0.0,v2.1.0,New,CVE-2024-2222,HIGH,curl,8.1.0,7.5,Use-after-free in HTTP/2
+edge-router,v2.0.0,v2.1.0,Fixed,CVE-2023-3333,HIGH,busybox,1.35,7.1,Path traversal in tar

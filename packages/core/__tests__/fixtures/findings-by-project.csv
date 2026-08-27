@@ -1,0 +1,5 @@
+CVE ID,Severity,CVSS,KEV,Project Name,Project Version,Folder,Component Group,Component,Component Version,Status,Reachability,Detected,Exploit Maturity,CWE,Description
+CVE-2024-1234,CRITICAL,9.8,true,edge-router,v2.1.0,Gateways,crypto,openssl,3.0.2,IN_TRIAGE,REACHABLE,2026-08-01,WEAPONIZED,CWE-787,"Out-of-bounds write, heap"
+CVE-2024-5678,HIGH,7.5,false,edge-router,v2.1.0,Gateways,net,curl,8.1.0,OPEN,REACHABLE,2026-08-02,POC,CWE-416,Use-after-free
+CVE-2024-9999,MEDIUM,5.3,false,edge-router,v2.1.0,Gateways,base,busybox,1.36,OPEN,UNKNOWN,2026-08-03,NONE,CWE-22,Path traversal
+CVE-2024-0001,LOW,3.1,false,edge-router,v2.1.0,Gateways,base,zlib,1.2.13,OPEN,UNREACHABLE,2026-08-04,NONE,CWE-125,Out-of-bounds read

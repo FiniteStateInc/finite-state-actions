@@ -78462,33 +78462,90 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.parseCsvRows = parseCsvRows;
 exports.parseTriageCsv = parseTriageCsv;
 exports.parseVersionComparisonCsv = parseVersionComparisonCsv;
-exports.parseFindingsSummaryJson = parseFindingsSummaryJson;
+exports.parseSeverityCounts = parseSeverityCounts;
 exports.parseReportDirectory = parseReportDirectory;
 const fs_1 = __nccwpck_require__(79896);
 const path_1 = __nccwpck_require__(16928);
 // ── Helpers ────────────────────────────────────────────────────────────────────
 /**
  * Parse a CSV string into an array of row objects keyed by header name.
- * Handles standard comma-separated values with a header row.
+ *
+ * fs-report writes its CSVs with pandas `to_csv`, so free-text columns
+ * (`Title`, `Description`, `ai_guidance`, …) arrive double-quoted with
+ * embedded commas, newlines and doubled quotes. A naive `split(',')` shears
+ * those rows apart and misaligns every later column, so this walks the text
+ * character by character instead.
  */
 function parseCsvRows(csv) {
-    const lines = csv
-        .trim()
-        .split('\n')
-        .filter((l) => l.trim().length > 0);
-    if (lines.length < 2)
+    const records = [];
+    let field = '';
+    let record = [];
+    let inQuotes = false;
+    const endField = () => {
+        record.push(field);
+        field = '';
+    };
+    const endRecord = () => {
+        endField();
+        records.push(record);
+        record = [];
+    };
+    for (let i = 0; i < csv.length; i++) {
+        const ch = csv[i];
+        if (inQuotes) {
+            if (ch === '"') {
+                if (csv[i + 1] === '"') {
+                    field += '"';
+                    i++;
+                }
+                else {
+                    inQuotes = false;
+                }
+            }
+            else {
+                field += ch;
+            }
+            continue;
+        }
+        if (ch === '"') {
+            inQuotes = true;
+        }
+        else if (ch === ',') {
+            endField();
+        }
+        else if (ch === '\n') {
+            endRecord();
+        }
+        else if (ch === '\r') {
+            // CRLF — the \n that follows closes the record
+        }
+        else {
+            field += ch;
+        }
+    }
+    // A trailing newline leaves an empty pending record; a missing one does not.
+    if (field.length > 0 || record.length > 0)
+        endRecord();
+    const nonEmpty = records.filter((r) => r.some((v) => v.trim().length > 0));
+    if (nonEmpty.length < 2)
         return [];
-    const headers = lines[0].split(',').map((h) => h.trim());
-    const rows = [];
-    for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].split(',').map((v) => v.trim());
+    const headers = nonEmpty[0].map((h) => h.trim());
+    return nonEmpty.slice(1).map((values) => {
         const row = {};
         headers.forEach((header, idx) => {
             row[header] = values[idx] ?? '';
         });
-        rows.push(row);
+        return row;
+    });
+}
+/** Read the first present column from a row, tolerating header renames. */
+function pick(row, ...names) {
+    for (const name of names) {
+        const value = row[name];
+        if (value !== undefined && value.trim().length > 0)
+            return value.trim();
     }
-    return rows;
+    return '';
 }
 function emptySeverityCounts() {
     return { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, NONE: 0 };
@@ -78499,10 +78556,35 @@ function incrementSeverity(counts, severity) {
         counts[key]++;
     }
 }
+function normalizeSeverity(raw) {
+    const key = raw.toUpperCase();
+    return (key in emptySeverityCounts() ? key : 'NONE');
+}
+/**
+ * fs-report's Triage Prioritization transform emits severity-style band names
+ * (`BAND_ORDER = CRITICAL, HIGH, MEDIUM, LOW, INFO`), while this repo's gates
+ * and PR comments are expressed in P0–P3. Map the four gateable bands and drop
+ * INFO, which has no P-band equivalent. A `--scoring-file` that names its bands
+ * P0–P3 directly is passed through unchanged.
+ */
+const BAND_TO_PRIORITY = {
+    CRITICAL: 'P0',
+    HIGH: 'P1',
+    MEDIUM: 'P2',
+    LOW: 'P3',
+    P0: 'P0',
+    P1: 'P1',
+    P2: 'P2',
+    P3: 'P3',
+};
+const PRIORITY_RANK = { P0: 0, P1: 1, P2: 2, P3: 3 };
 // ── Parsers ────────────────────────────────────────────────────────────────────
 /**
  * Parse a Triage Prioritization CSV into TriageBands.
  * Counts each priority band and collects P0/P1 entries as topFindings.
+ *
+ * Columns come from `triage_prioritization_transform`'s `output_columns`, which
+ * are snake_case (`priority_band`, `finding_id`, `component_name`, …).
  */
 function parseTriageCsv(csv) {
     const rows = parseCsvRows(csv);
@@ -78513,36 +78595,36 @@ function parseTriageCsv(csv) {
         P3: 0,
         topFindings: [],
     };
+    const ranked = [];
     for (const row of rows) {
-        const band = row['Priority Band']?.trim();
-        if (band && band in bands) {
-            // eslint-disable-next-line no-extra-semi
-            ;
-            bands[band]++;
-        }
+        const rawBand = pick(row, 'priority_band', 'Priority Band').toUpperCase();
+        const band = BAND_TO_PRIORITY[rawBand];
+        if (!band)
+            continue;
+        bands[band]++;
         if (band === 'P0' || band === 'P1') {
-            const finding = {
-                findingId: row['CVE ID'] ?? '',
-                severity: (row['Severity']?.toUpperCase() ?? 'NONE'),
-                risk: 0,
-                component: row['Component'] ?? '',
-            };
-            bands.topFindings.push(finding);
+            ranked.push({
+                band,
+                finding: {
+                    findingId: pick(row, 'finding_id', 'CVE ID', 'ID'),
+                    severity: normalizeSeverity(pick(row, 'severity', 'Severity')),
+                    risk: Number(pick(row, 'risk', 'triage_score')) || 0,
+                    component: pick(row, 'component_name', 'Component Name', 'Component'),
+                },
+            });
         }
     }
-    // Sort topFindings: P0 before P1
-    bands.topFindings.sort((a, b) => {
-        const bandOf = (f) => {
-            const r = rows.find((row) => row['CVE ID'] === f.findingId);
-            return r?.['Priority Band'] ?? '';
-        };
-        return bandOf(a).localeCompare(bandOf(b));
-    });
+    ranked.sort((a, b) => PRIORITY_RANK[a.band] - PRIORITY_RANK[b.band]);
+    bands.topFindings = ranked.map((r) => r.finding);
     return bands;
 }
 /**
- * Parse a Version Comparison CSV into a VersionDelta.
- * Splits rows into new/fixed findings and counts each group by severity.
+ * Parse a Version Comparison findings-churn CSV into a VersionDelta.
+ *
+ * This is the `<recipe>_Detail_Findings_Churn.csv` sibling file, not the main
+ * `Version Comparison.csv` — the main file is the per-version summary table
+ * (Project/Version/Total Findings/…) and carries no per-finding rows.
+ * `Change Type` is `New` or `Fixed`.
  */
 function parseVersionComparisonCsv(csv) {
     const rows = parseCsvRows(csv);
@@ -78551,12 +78633,12 @@ function parseVersionComparisonCsv(csv) {
     const newBySeverity = emptySeverityCounts();
     const fixedBySeverity = emptySeverityCounts();
     for (const row of rows) {
-        const changeType = row['Change Type']?.trim().toUpperCase();
+        const changeType = pick(row, 'Change Type', 'change_type').toUpperCase();
         const finding = {
-            findingId: row['CVE ID'] ?? '',
-            severity: (row['Severity']?.toUpperCase() ?? 'NONE'),
-            risk: 0,
-            component: row['Component'] ?? '',
+            findingId: pick(row, 'ID', 'CVE ID', 'finding_id'),
+            severity: normalizeSeverity(pick(row, 'Severity', 'severity')),
+            risk: Number(pick(row, 'Score', 'risk')) || 0,
+            component: pick(row, 'Component Name', 'Component', 'component_name'),
         };
         if (changeType === 'NEW') {
             newFindings.push(finding);
@@ -78570,46 +78652,54 @@ function parseVersionComparisonCsv(csv) {
     return { newFindings, fixedFindings, newBySeverity, fixedBySeverity };
 }
 /**
- * Parse a findings_summary.json string into a ReportSummary.
- * Expects { bySeverity: {...}, total: number }.
+ * Count a findings CSV's `severity` column into a SeverityCounts.
+ * Works on both `Findings by Project.csv` (`Severity`) and
+ * `Triage Prioritization.csv` (`severity`).
  */
-function parseFindingsSummaryJson(json) {
-    const data = JSON.parse(json);
-    const severityCounts = {
-        CRITICAL: data.bySeverity.CRITICAL ?? 0,
-        HIGH: data.bySeverity.HIGH ?? 0,
-        MEDIUM: data.bySeverity.MEDIUM ?? 0,
-        LOW: data.bySeverity.LOW ?? 0,
-        NONE: data.bySeverity.NONE ?? 0,
-    };
-    return {
-        severityCounts,
-        totalFindings: data.total,
-    };
+function parseSeverityCounts(csv) {
+    const rows = parseCsvRows(csv);
+    const severityCounts = emptySeverityCounts();
+    for (const row of rows) {
+        incrementSeverity(severityCounts, pick(row, 'Severity', 'severity'));
+    }
+    return { severityCounts, totalFindings: rows.length };
 }
 /**
- * Read a standard fs-report output directory and return a combined ReportSummary.
- * Reads:
+ * Read an fs-report output directory and return a combined ReportSummary.
+ *
+ * `fs-report run --headless --output <dir>` writes one subdirectory per recipe,
+ * named after the recipe, with files sharing that base name — so:
  *   {dir}/Triage Prioritization/Triage Prioritization.csv
- *   {dir}/Version Comparison/Version Comparison.csv
- *   {dir}/findings_summary.json
+ *   {dir}/Version Comparison/Version Comparison_Detail_Findings_Churn.csv
+ *   {dir}/Findings by Project/Findings by Project.csv
+ *
+ * Severity counts come from Findings by Project when that recipe ran (it is the
+ * full inventory) and fall back to Triage Prioritization otherwise. fs-report
+ * writes no aggregate summary file, so there is nothing else to read.
  */
 function parseReportDirectory(reportDir) {
     const triagePath = (0, path_1.join)(reportDir, 'Triage Prioritization', 'Triage Prioritization.csv');
-    const versionPath = (0, path_1.join)(reportDir, 'Version Comparison', 'Version Comparison.csv');
-    const summaryPath = (0, path_1.join)(reportDir, 'findings_summary.json');
-    let summary = {
+    const churnPath = (0, path_1.join)(reportDir, 'Version Comparison', 'Version Comparison_Detail_Findings_Churn.csv');
+    const findingsPath = (0, path_1.join)(reportDir, 'Findings by Project', 'Findings by Project.csv');
+    const summary = {
         severityCounts: emptySeverityCounts(),
         totalFindings: 0,
     };
-    if ((0, fs_1.existsSync)(summaryPath)) {
-        summary = parseFindingsSummaryJson((0, fs_1.readFileSync)(summaryPath, 'utf-8'));
+    const severitySource = (0, fs_1.existsSync)(findingsPath)
+        ? findingsPath
+        : (0, fs_1.existsSync)(triagePath)
+            ? triagePath
+            : undefined;
+    if (severitySource) {
+        const counted = parseSeverityCounts((0, fs_1.readFileSync)(severitySource, 'utf-8'));
+        summary.severityCounts = counted.severityCounts;
+        summary.totalFindings = counted.totalFindings;
     }
     if ((0, fs_1.existsSync)(triagePath)) {
         summary.triageBands = parseTriageCsv((0, fs_1.readFileSync)(triagePath, 'utf-8'));
     }
-    if ((0, fs_1.existsSync)(versionPath)) {
-        summary.versionDelta = parseVersionComparisonCsv((0, fs_1.readFileSync)(versionPath, 'utf-8'));
+    if ((0, fs_1.existsSync)(churnPath)) {
+        summary.versionDelta = parseVersionComparisonCsv((0, fs_1.readFileSync)(churnPath, 'utf-8'));
     }
     return summary;
 }
@@ -78689,10 +78779,15 @@ async function run() {
         const recipe = core.getInput('recipe', { required: true });
         const projectIdOverride = core.getInput('project-id') || undefined;
         const versionIdOverride = core.getInput('version-id') || undefined;
+        const folder = core.getInput('folder') || undefined;
         const baselineVersion = core.getInput('baseline-version') || undefined;
         const currentVersion = core.getInput('current-version') || undefined;
+        const left = core.getInput('left') || undefined;
+        const right = core.getInput('right') || undefined;
         const period = core.getInput('period') || undefined;
         const cve = core.getInput('cve') || undefined;
+        const component = core.getInput('component') || undefined;
+        const dataFile = core.getInput('data-file') || undefined;
         const findingTypes = core.getInput('finding-types') || undefined;
         const openOnly = core.getBooleanInput('open-only');
         const scoringFile = core.getInput('scoring-file') || undefined;
@@ -78713,50 +78808,81 @@ async function run() {
         await exec.exec('pipx', pipxInstallArgs, {
             env: Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== undefined)),
         });
-        // ── Build fs-report args ─────────────────────────────────────────────────
-        const args = ['run', '--headless', '--output', outputDir, '--cache-ttl', cacheTtl];
-        // Split recipes by comma, add each as --recipe "Name"
+        // Split recipes by comma
         const recipes = recipe
             .split(',')
             .map((r) => r.trim())
             .filter(Boolean);
-        for (const r of recipes) {
-            args.push('--recipe', r);
+        // ── Build fs-report args ─────────────────────────────────────────────────
+        // fs-report's comparison recipes (Component Diff, Finding Diff, License
+        // Diff, Triage Status Diff) are rejected by `fs-report run` — the engine
+        // dispatches them only inside a meta-compare bundle, and points at
+        // `fs-report compare <recipe> --left <scope> --right <scope>` instead. The
+        // `compare` subcommand takes a much narrower flag set than `run`, so
+        // supplying left/right selects the whole invocation, not just two flags.
+        const compareMode = Boolean(left || right);
+        if (compareMode && !(left && right)) {
+            throw new Error("Comparison reports need both 'left' and 'right' scope references");
         }
-        // Add project/version from context
-        if (ctx.projectId) {
-            args.push('--project-id', ctx.projectId);
+        const args = compareMode
+            ? ['compare', ...recipes, '--left', left, '--right', right]
+            : ['run', '--headless', '--cache-ttl', cacheTtl];
+        args.push('--output', outputDir);
+        if (compareMode) {
+            // `compare` accepts scopes positionally via --left/--right and shares only
+            // --finding-types with `run`; everything else must go through extra-args.
+            if (findingTypes) {
+                args.push('--finding-types', findingTypes);
+            }
         }
-        if (ctx.versionId) {
-            args.push('--version-id', ctx.versionId);
-        }
-        // Optional flags
-        if (period) {
-            args.push('--period', period);
-        }
-        if (cve) {
-            args.push('--cve', cve);
-        }
-        if (findingTypes) {
-            args.push('--finding-types', findingTypes);
-        }
-        if (openOnly) {
-            args.push('--open-only');
-        }
-        if (scoringFile) {
-            args.push('--scoring-file', scoringFile);
-        }
-        if (ai) {
-            args.push('--ai');
-        }
-        if (aiPrompts) {
-            args.push('--ai-prompts');
-        }
-        if (baselineVersion) {
-            args.push('--baseline-version', baselineVersion);
-        }
-        if (currentVersion) {
-            args.push('--current-version', currentVersion);
+        else {
+            for (const r of recipes) {
+                args.push('--recipe', r);
+            }
+            // Scope from setup context (or per-step overrides)
+            if (ctx.projectId) {
+                args.push('--project', ctx.projectId);
+            }
+            if (ctx.versionId) {
+                args.push('--version', ctx.versionId);
+            }
+            if (folder) {
+                args.push('--folder', folder);
+            }
+            // Optional flags
+            if (period) {
+                args.push('--period', period);
+            }
+            if (cve) {
+                args.push('--cve', cve);
+            }
+            if (component) {
+                args.push('--component', component);
+            }
+            if (dataFile) {
+                args.push('--data-file', dataFile);
+            }
+            if (findingTypes) {
+                args.push('--finding-types', findingTypes);
+            }
+            if (openOnly) {
+                args.push('--open-only');
+            }
+            if (scoringFile) {
+                args.push('--scoring-file', scoringFile);
+            }
+            if (ai) {
+                args.push('--ai');
+            }
+            if (aiPrompts) {
+                args.push('--ai-prompts');
+            }
+            if (baselineVersion) {
+                args.push('--baseline-version', baselineVersion);
+            }
+            if (currentVersion) {
+                args.push('--current-version', currentVersion);
+            }
         }
         // Split extra-args by whitespace and append
         if (extraArgs) {
@@ -78764,7 +78890,7 @@ async function run() {
             args.push(...extra);
         }
         // ── Run fs-report ────────────────────────────────────────────────────────
-        core.info(`Running fs-report with ${recipes.length} recipe(s): ${recipes.join(', ')}`);
+        core.info(`Running fs-report ${compareMode ? 'compare' : 'run'} with ${recipes.length} recipe(s): ${recipes.join(', ')}`);
         const baseEnv = Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== undefined));
         await exec.exec('fs-report', args, {
             env: {
