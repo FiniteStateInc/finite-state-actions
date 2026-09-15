@@ -12,11 +12,11 @@ inputs:
     description: 'JSON string from run-report summary-json output'
     required: false
   template:
-    description: 'Comment template: summary | detailed | triage | comparison | custom'
+    description: 'Comment template: summary | triage | comparison. detailed and custom are accepted but render summary'
     required: false
     default: 'summary'
   custom-template:
-    description: 'Path to a custom Handlebars/Markdown template file'
+    description: 'Accepted and ignored — custom templates are not implemented'
     required: false
   gate-result:
     description: 'Quality gate result: pass or fail'
@@ -29,7 +29,7 @@ inputs:
     required: false
     default: 'finite-state'
   collapse-details:
-    description: 'Wrap verbose sections in a <details> tag'
+    description: 'Accepted and ignored — no rendered section is collapsed today'
     required: false
     default: 'true'
 outputs:

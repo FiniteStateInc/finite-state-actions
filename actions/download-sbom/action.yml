@@ -32,7 +32,7 @@ outputs:
   file:
     description: 'Path to the downloaded SBOM file'
   artifact-name:
-    description: 'Name of the uploaded artifact (if upload-artifact is true)'
+    description: 'Artifact name — set even when upload-artifact is false'
   component-count:
     description: 'Number of components in the SBOM'
 runs:

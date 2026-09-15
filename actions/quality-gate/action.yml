@@ -52,7 +52,7 @@ inputs:
     required: false
     default: '-1'
   ai:
-    description: 'Enable AI-enhanced gate analysis'
+    description: 'Accepted and ignored — AI-enhanced gate analysis is not implemented'
     required: false
     default: 'false'
 outputs:
