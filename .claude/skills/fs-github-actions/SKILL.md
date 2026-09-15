@@ -11,7 +11,9 @@ globs:
 
 # Finite State GitHub Actions Suite
 
-A modular suite of GitHub Actions for the Finite State platform, published to the GitHub Marketplace as `finite-state/*`. Enables firmware/software security scanning, vulnerability gating, PR reporting, and SBOM export in CI/CD pipelines.
+A modular suite of GitHub Actions for the Finite State platform. Enables firmware/software security scanning, vulnerability gating, PR reporting, and SBOM export in CI/CD pipelines.
+
+The actions live in subdirectories of a single monorepo, so every `uses:` needs the full path — `FiniteStateInc/finite-state-actions/actions/<name>@v2`. There is no short `finite-state/<name>` form.
 
 **Repo:** `FiniteStateInc/finite-state-actions`
 **Customer resources:** `customer-resources/02-ci-cd-automation/github-actions/`
@@ -24,7 +26,7 @@ A modular suite of GitHub Actions for the Finite State platform, published to th
 
 Establishes authentication and configuration context for all downstream actions in the same job.
 
-**Usage:** `finite-state/setup@v2`
+**Usage:** `FiniteStateInc/finite-state-actions/actions/setup@v2`
 
 **Inputs:**
 
@@ -49,7 +51,7 @@ Establishes authentication and configuration context for all downstream actions 
 
 **Unknown `project-name` is not fatal (v2.1 and later):** if the name matches no existing project, `setup` logs a warning, skips the project ID, and exports the requested name as `FINITE_STATE_PROJECT_NAME`. `scan` then passes it as `fs-cli --name`, so the platform creates the project on the first scan under the name you asked for rather than the repository name. A name matching **more than one** project still fails — there is no safe guess.
 
-**fs-cli installation (v2 and later):** `setup` calls `GET /public/v0/cli/download?os=<os>&arch=<arch>` with the API token, downloads the binary from the returned pre-signed URL into `$RUNNER_TEMP/fs-cli`, `chmod 0755`s it, and adds that directory to `PATH`. Notes:
+**fs-cli installation (v2 and later):** `setup` calls `GET https://<domain>/api/public/v0/cli/download?os=<os>&arch=<arch>` with the API token, downloads the binary from the returned pre-signed URL into `$RUNNER_TEMP/fs-cli`, `chmod 0755`s it, and adds that directory to `PATH`. Notes:
 
 - The runner needs no `jq`, `sudo`, or write access to `/usr/local/bin` — everything happens under `RUNNER_TEMP`.
 - The download is token-authenticated, so an expired or scope-limited token fails here rather than at scan time.
@@ -63,7 +65,7 @@ Establishes authentication and configuration context for all downstream actions 
 **Example:**
 
 ```yaml
-- uses: finite-state/setup@v2
+- uses: FiniteStateInc/finite-state-actions/actions/setup@v2
   id: fs
   with:
     api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
@@ -79,7 +81,7 @@ Runs `fs-cli scan` to analyze project dependencies and upload results to the Fin
 
 **Standalone use (v2.1 and later):** `setup` is optional. Pass `api-token` (and `domain`/`project-name` as needed) directly to `scan` and it downloads fs-cli itself. When `setup` did run, `scan` reuses the fs-cli already on `PATH` and inherits auth from the exported env — no second download.
 
-**Usage:** `finite-state/scan@v2`
+**Usage:** `FiniteStateInc/finite-state-actions/actions/scan@v2`
 
 **Inputs:**
 
@@ -115,7 +117,7 @@ Runs `fs-cli scan` to analyze project dependencies and upload results to the Fin
 **Example:**
 
 ```yaml
-- uses: finite-state/scan@v2
+- uses: FiniteStateInc/finite-state-actions/actions/scan@v2
   with:
     version: ${{ github.ref_name }}
 ```
@@ -126,7 +128,7 @@ Runs `fs-cli scan` to analyze project dependencies and upload results to the Fin
 
 Uploads a binary, SBOM, or third-party scan results for analysis. Handles all upload types through a single action with a `type` input.
 
-**Usage:** `finite-state/upload@v2`
+**Usage:** `FiniteStateInc/finite-state-actions/actions/upload@v2`
 
 > Renamed from `upload-scan` in v2. `actions/upload-scan` still resolves — it is a composite shim that forwards every input and output to `upload` and emits a deprecation warning. It will be removed in v3.
 
@@ -135,8 +137,11 @@ Uploads a binary, SBOM, or third-party scan results for analysis. Handles all up
 | Input                 | Required | Default    | Description                                                                                                                |
 | --------------------- | -------- | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `type`                | yes      | —          | `sca`, `sast`, `config`, `vulnerability-analysis`, `sbom`, `third-party`                                                   |
-| `file`                | yes      | —          | Path to the file to upload                                                                                                 |
+| `file`                | yes      | —          | Path to the file to upload. A glob is allowed if it matches exactly one file                                               |
+| `api-token`           | no       | from setup | FS API token. Required only when `setup` did not run in this job                                                           |
+| `domain`              | no       | from setup | Platform domain. Falls back to setup context, then `app.finitestate.io`                                                    |
 | `project-id`          | no       | from setup | Override project (falls back to setup context)                                                                             |
+| `project-name`        | no       | from setup | Project name, created if nothing matches. Ignored when `project-id` is set                                                 |
 | `version`             | no       | —          | Version name — creates a new version if provided                                                                           |
 | `version-id`          | no       | —          | Existing version ID (mutually exclusive with `version`)                                                                    |
 | `scanner-type`        | no       | —          | Required for `third-party` — e.g., `grype`, `trivy`, `snyk`                                                                |
@@ -180,14 +185,14 @@ Uploads a binary, SBOM, or third-party scan results for analysis. Handles all up
 
 ```yaml
 # Binary SCA scan
-- uses: finite-state/upload@v2
+- uses: FiniteStateInc/finite-state-actions/actions/upload@v2
   with:
     type: sca
     file: build/firmware.bin
     version: 'v${{ github.sha }}'
 
 # Third-party scan results
-- uses: finite-state/upload@v2
+- uses: FiniteStateInc/finite-state-actions/actions/upload@v2
   with:
     type: third-party
     scanner-type: grype
@@ -195,7 +200,7 @@ Uploads a binary, SBOM, or third-party scan results for analysis. Handles all up
     version: 'v${{ github.sha }}'
 
 # SBOM import
-- uses: finite-state/upload@v2
+- uses: FiniteStateInc/finite-state-actions/actions/upload@v2
   with:
     type: sbom
     sbom-format: cdx
@@ -209,7 +214,7 @@ Uploads a binary, SBOM, or third-party scan results for analysis. Handles all up
 
 Wraps `fs-report` as the findings/reporting engine. Installs fs-report, runs recipes, parses outputs, and uploads report artifacts.
 
-**Usage:** `finite-state/run-report@v2`
+**Usage:** `FiniteStateInc/finite-state-actions/actions/run-report@v2`
 
 **Inputs:**
 
@@ -312,7 +317,7 @@ Seven further recipes ship under `fs_report/recipes/forge/` (Assessment Overview
 
 ```yaml
 # Triage Prioritization with custom scoring
-- uses: finite-state/run-report@v2
+- uses: FiniteStateInc/finite-state-actions/actions/run-report@v2
   id: triage
   with:
     recipe: 'Triage Prioritization'
@@ -320,7 +325,7 @@ Seven further recipes ship under `fs_report/recipes/forge/` (Assessment Overview
     scoring-file: .github/fs-scoring.yaml
 
 # Multiple recipes in one run
-- uses: finite-state/run-report@v2
+- uses: FiniteStateInc/finite-state-actions/actions/run-report@v2
   id: report
   with:
     recipe: 'Triage Prioritization,Version Comparison,Remediation Package'
@@ -328,26 +333,26 @@ Seven further recipes ship under `fs_report/recipes/forge/` (Assessment Overview
     ai: true
 
 # Zero-day triage for a named component, portfolio-wide
-- uses: finite-state/run-report@v2
+- uses: FiniteStateInc/finite-state-actions/actions/run-report@v2
   with:
     recipe: 'Component Impact,Component Remediation Package'
     component: openssl
 
 # CVE dossier across every project
-- uses: finite-state/run-report@v2
+- uses: FiniteStateInc/finite-state-actions/actions/run-report@v2
   with:
     recipe: 'CVE Impact'
     cve: CVE-2024-3094
 
 # Comparison report — runs `fs-report compare`
-- uses: finite-state/run-report@v2
+- uses: FiniteStateInc/finite-state-actions/actions/run-report@v2
   with:
     recipe: 'Component Diff,License Diff'
     left: 'project:BN85@v3.2.1'
     right: 'project:BN85@v3.3.0'
 
 # A flag with no dedicated input
-- uses: finite-state/run-report@v2
+- uses: FiniteStateInc/finite-state-actions/actions/run-report@v2
   with:
     recipe: 'Findings by Project'
     folder: Gateways
@@ -360,7 +365,7 @@ Seven further recipes ship under `fs_report/recipes/forge/` (Assessment Overview
 
 Consumes outputs from `run-report` to pass/fail the workflow. Supports three gating modes that can be combined (AND'd).
 
-**Usage:** `finite-state/quality-gate@v2`
+**Usage:** `FiniteStateInc/finite-state-actions/actions/quality-gate@v2`
 
 **Inputs:**
 
@@ -388,14 +393,13 @@ Consumes outputs from `run-report` to pass/fail the workflow. Supports three gat
 
 **Triage priority mode inputs:**
 
-| Input         | Default       | Description                              |
-| ------------- | ------------- | ---------------------------------------- |
-| `fail-on-p0`  | `true`        | Fail if any P0 (CRITICAL band) findings  |
-| `fail-on-p1`  | `false`       | Fail if any P1 (HIGH band) findings      |
-| `max-p0`      | `0`           | Max allowed P0 findings                  |
-| `max-p1`      | `-1`          | Max allowed P1 findings (-1 = unlimited) |
-| `ai`          | `false`       | Enable AI-powered triage analysis        |
-| `ai-provider` | auto-detected | `anthropic`, `openai`, or `copilot`      |
+| Input        | Default | Description                              |
+| ------------ | ------- | ---------------------------------------- |
+| `fail-on-p0` | `true`  | Fail if any P0 (CRITICAL band) findings  |
+| `fail-on-p1` | `false` | Fail if any P1 (HIGH band) findings      |
+| `max-p0`     | `0`     | Max allowed P0 findings                  |
+| `max-p1`     | `-1`    | Max allowed P1 findings (-1 = unlimited) |
+| `ai`         | `false` | Accepted and ignored — not implemented   |
 
 **Outputs:**
 
@@ -411,14 +415,16 @@ Consumes outputs from `run-report` to pass/fail the workflow. Supports three gat
 
 - Gate 1 (P0/CRITICAL): `reachability_score > 0` AND (`has_exploit == true` OR `in_kev == true`)
 - Gate 2 (P1/HIGH): `reachability_score >= 0` AND `attack_vector in ["NETWORK"]` AND `epss_percentile > 0.9`
-- Remaining findings scored additively and banded into P2 (MEDIUM) / P3 (LOW/INFO)
+- Remaining findings scored additively and banded into P2 (MEDIUM) / P3 (LOW)
 
 Custom scoring weights can be provided via `scoring-file` in the upstream `run-report` step.
+
+The banding is fs-report's, not this action's: `quality-gate` reads bands out of `Triage Prioritization.csv`, where `run-report` maps `CRITICAL/HIGH/MEDIUM/LOW` onto `P0/P1/P2/P3`. `INFO` has no P-band equivalent and is dropped, so `INFO` findings are never gateable. A `--scoring-file` that names its bands `P0`–`P3` directly passes through unchanged.
 
 **Example:**
 
 ```yaml
-- uses: finite-state/quality-gate@v2
+- uses: FiniteStateInc/finite-state-actions/actions/quality-gate@v2
   id: gate
   with:
     mode: delta,triage-priority
@@ -434,20 +440,20 @@ Custom scoring weights can be provided via `scoring-file` in the upstream `run-r
 
 Posts a findings summary as a PR comment, updated on each push (edit-in-place, not spam).
 
-**Usage:** `finite-state/pr-comment@v2`
+**Usage:** `FiniteStateInc/finite-state-actions/actions/pr-comment@v2`
 
 **Inputs:**
 
-| Input              | Required | Default         | Description                                             |
-| ------------------ | -------- | --------------- | ------------------------------------------------------- |
-| `report-dir`       | no       | from run-report | Path to fs-report output                                |
-| `summary-json`     | no       | from run-report | Direct JSON from run-report outputs                     |
-| `template`         | no       | `summary`       | `summary`, `detailed`, `triage`, `comparison`, `custom` |
-| `custom-template`  | no       | —               | Path to a custom Handlebars template file               |
-| `gate-result`      | no       | —               | Pass/fail from quality-gate to include in comment       |
-| `gate-summary`     | no       | —               | Gate evaluation summary text                            |
-| `comment-tag`      | no       | `finite-state`  | Unique tag for edit-in-place                            |
-| `collapse-details` | no       | `true`          | Wrap detailed findings in `<details>`                   |
+| Input              | Required | Default         | Description                                       |
+| ------------------ | -------- | --------------- | ------------------------------------------------- |
+| `report-dir`       | no       | from run-report | Path to fs-report output                          |
+| `summary-json`     | no       | from run-report | Direct JSON from run-report outputs               |
+| `template`         | no       | `summary`       | `summary`, `triage`, or `comparison` (see below)  |
+| `custom-template`  | no       | —               | Accepted and ignored — not implemented            |
+| `gate-result`      | no       | —               | Pass/fail from quality-gate to include in comment |
+| `gate-summary`     | no       | —               | Gate evaluation summary text                      |
+| `comment-tag`      | no       | `finite-state`  | Unique tag for edit-in-place                      |
+| `collapse-details` | no       | `true`          | Accepted and ignored — not implemented            |
 
 **Built-in templates:**
 
@@ -456,8 +462,8 @@ Posts a findings summary as a PR comment, updated on each push (edit-in-place, n
 | `summary`    | Compact severity overview with gate status and report artifact links           |
 | `triage`     | P0/P1/P2/P3 band counts, gate status per band, top P0/P1 findings listed       |
 | `comparison` | Version delta table (baseline vs current), new/fixed findings, component churn |
-| `detailed`   | Full findings table collapsed in `<details>` by default                        |
-| `custom`     | User-provided Handlebars template with access to all report data               |
+
+Those three renderers are all that exist. `detailed` and `custom` are accepted but fall through to `summary`, and the action carries no templating engine — `custom-template` is never read, and nothing is wrapped in `<details>`.
 
 **Outputs:**
 
@@ -471,7 +477,7 @@ Posts a findings summary as a PR comment, updated on each push (edit-in-place, n
 **Example:**
 
 ```yaml
-- uses: finite-state/pr-comment@v2
+- uses: FiniteStateInc/finite-state-actions/actions/pr-comment@v2
   if: always()
   with:
     template: triage
@@ -488,7 +494,7 @@ Posts a findings summary as a PR comment, updated on each push (edit-in-place, n
 
 Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
 
-**Usage:** `finite-state/download-sbom@v2`
+**Usage:** `FiniteStateInc/finite-state-actions/actions/download-sbom@v2`
 
 **Inputs:**
 
@@ -503,18 +509,18 @@ Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
 
 **Outputs:**
 
-| Output            | Description                      |
-| ----------------- | -------------------------------- |
-| `file`            | Path to the downloaded SBOM file |
-| `artifact-name`   | Uploaded artifact name           |
-| `component-count` | Number of components in the SBOM |
+| Output            | Description                                                |
+| ----------------- | ---------------------------------------------------------- |
+| `file`            | Path to the downloaded SBOM file                           |
+| `artifact-name`   | Artifact name — set even when `upload-artifact` is `false` |
+| `component-count` | Number of components in the SBOM                           |
 
 **Behavior:** Calls `GET /sboms/cyclonedx/{pvId}` or `GET /sboms/spdx/{pvId}`. Writes to output file. Optionally uploads as workflow artifact. This is the one action that calls the API directly (not through fs-report) since fs-report does not handle SBOM export.
 
 **Example:**
 
 ```yaml
-- uses: finite-state/download-sbom@v2
+- uses: FiniteStateInc/finite-state-actions/actions/download-sbom@v2
   with:
     format: cyclonedx
     include-vex: true
@@ -559,45 +565,45 @@ download-sbom (reads env + setup/upload outputs)
 
 ### Key chaining rules
 
-1. **setup comes first when used** -- it provides auth context via env vars, and installs fs-cli. Every action except `scan` requires it.
+1. **setup comes first when used** -- it provides auth context via env vars, and installs fs-cli. Every action except `scan` and `upload` requires it.
 2. **upload before run-report** -- the scan must complete before reports can analyze it.
 3. **run-report before quality-gate and pr-comment** -- both consume report outputs.
 4. **quality-gate before pr-comment** (optional) -- if you want gate results in the PR comment, run the gate first.
 5. **download-sbom is independent** -- it only needs setup context and optionally a version-id from upload.
-6. **Only `scan` runs without setup** -- it accepts `api-token`/`domain`/`project-name` directly and downloads fs-cli when PATH has none. The other actions read auth from the env vars `setup` exports, though all of them accept explicit project/version inputs instead of upstream outputs.
+6. **`scan` and `upload` run without setup** -- both accept `api-token`/`domain`/`project-name` directly and download fs-cli when PATH has none. The other actions read auth from the env vars `setup` exports, though all of them accept explicit project/version inputs instead of upstream outputs.
 
 ### Referencing upstream outputs
 
 Use `steps.<step-id>.outputs.<output-name>`:
 
 ```yaml
-- uses: finite-state/setup@v2
+- uses: FiniteStateInc/finite-state-actions/actions/setup@v2
   id: fs
   with:
     api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
 
-- uses: finite-state/upload@v2
+- uses: FiniteStateInc/finite-state-actions/actions/upload@v2
   id: scan
   with:
     type: sca
     file: build/firmware.bin
 
 # Reference upload's version-id
-- uses: finite-state/run-report@v2
+- uses: FiniteStateInc/finite-state-actions/actions/run-report@v2
   id: report
   with:
     recipe: 'Triage Prioritization'
     version-id: ${{ steps.scan.outputs.version-id }}
 
 # Reference run-report's outputs
-- uses: finite-state/quality-gate@v2
+- uses: FiniteStateInc/finite-state-actions/actions/quality-gate@v2
   id: gate
   with:
     mode: triage-priority
     report-dir: ${{ steps.report.outputs.report-dir }}
 
 # Reference both report and gate outputs
-- uses: finite-state/pr-comment@v2
+- uses: FiniteStateInc/finite-state-actions/actions/pr-comment@v2
   with:
     report-dir: ${{ steps.report.outputs.report-dir }}
     gate-result: ${{ steps.gate.outputs.result }}
@@ -625,7 +631,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: finite-state/scan@v2
+      - uses: FiniteStateInc/finite-state-actions/actions/scan@v2
         with:
           api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
           domain: ${{ vars.FINITE_STATE_DOMAIN }}
@@ -653,32 +659,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: finite-state/setup@v2
+      - uses: FiniteStateInc/finite-state-actions/actions/setup@v2
         with:
           api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
           domain: ${{ vars.FINITE_STATE_DOMAIN }}
           project-id: ${{ vars.FINITE_STATE_PROJECT_ID }}
 
-      - uses: finite-state/upload@v2
+      - uses: FiniteStateInc/finite-state-actions/actions/upload@v2
         with:
           type: sca
           file: build/firmware.bin
           version: 'pr-${{ github.event.number }}'
 
-      - uses: finite-state/run-report@v2
+      - uses: FiniteStateInc/finite-state-actions/actions/run-report@v2
         id: report
         with:
           recipe: 'Triage Prioritization,Version Comparison'
           period: 30d
 
-      - uses: finite-state/quality-gate@v2
+      - uses: FiniteStateInc/finite-state-actions/actions/quality-gate@v2
         id: gate
         with:
           mode: delta,triage-priority
           max-new-critical: 0
           fail-on-p0: true
 
-      - uses: finite-state/pr-comment@v2
+      - uses: FiniteStateInc/finite-state-actions/actions/pr-comment@v2
         if: always()
         with:
           template: triage
@@ -712,13 +718,13 @@ jobs:
   report:
     runs-on: ubuntu-latest
     steps:
-      - uses: finite-state/setup@v2
+      - uses: FiniteStateInc/finite-state-actions/actions/setup@v2
         with:
           api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
           domain: ${{ vars.FINITE_STATE_DOMAIN }}
           project-id: ${{ vars.FINITE_STATE_PROJECT_ID }}
 
-      - uses: finite-state/run-report@v2
+      - uses: FiniteStateInc/finite-state-actions/actions/run-report@v2
         with:
           recipe: 'Executive Summary,Triage Prioritization,Remediation Package'
           period: 30d
@@ -755,20 +761,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: finite-state/setup@v2
+      - uses: FiniteStateInc/finite-state-actions/actions/setup@v2
         with:
           api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
           domain: ${{ vars.FINITE_STATE_DOMAIN }}
           project-id: ${{ vars.FINITE_STATE_PROJECT_ID }}
 
-      - uses: finite-state/upload@v2
+      - uses: FiniteStateInc/finite-state-actions/actions/upload@v2
         id: scan
         with:
           type: sca
           file: build/firmware.bin
           version: '${{ github.ref_name }}'
 
-      - uses: finite-state/download-sbom@v2
+      - uses: FiniteStateInc/finite-state-actions/actions/download-sbom@v2
         with:
           version-id: ${{ steps.scan.outputs.version-id }}
           format: cyclonedx
@@ -804,14 +810,14 @@ jobs:
       - uses: actions/checkout@v4
 
       # 1. Auth
-      - uses: finite-state/setup@v2
+      - uses: FiniteStateInc/finite-state-actions/actions/setup@v2
         with:
           api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
           domain: ${{ vars.FINITE_STATE_DOMAIN }}
           project-id: ${{ vars.FINITE_STATE_PROJECT_ID }}
 
       # 2. Upload and scan
-      - uses: finite-state/upload@v2
+      - uses: FiniteStateInc/finite-state-actions/actions/upload@v2
         id: scan
         with:
           type: sca
@@ -819,7 +825,7 @@ jobs:
           version: 'pr-${{ github.event.number }}'
 
       # 3. Generate reports (multiple recipes)
-      - uses: finite-state/run-report@v2
+      - uses: FiniteStateInc/finite-state-actions/actions/run-report@v2
         id: report
         with:
           recipe: 'Triage Prioritization,Version Comparison,Remediation Package'
@@ -828,7 +834,7 @@ jobs:
           ai: true
 
       # 4. Quality gate
-      - uses: finite-state/quality-gate@v2
+      - uses: FiniteStateInc/finite-state-actions/actions/quality-gate@v2
         id: gate
         with:
           mode: delta,threshold,triage-priority
@@ -838,7 +844,7 @@ jobs:
           fail-on-p0: true
 
       # 5. PR comment (always runs)
-      - uses: finite-state/pr-comment@v2
+      - uses: FiniteStateInc/finite-state-actions/actions/pr-comment@v2
         if: always()
         with:
           template: triage
@@ -847,7 +853,7 @@ jobs:
           report-dir: ${{ steps.report.outputs.report-dir }}
 
       # 6. Export SBOM
-      - uses: finite-state/download-sbom@v2
+      - uses: FiniteStateInc/finite-state-actions/actions/download-sbom@v2
         if: always()
         with:
           version-id: ${{ steps.scan.outputs.version-id }}
@@ -869,26 +875,26 @@ jobs:
 
 ### Authentication failures
 
-| Symptom                                 | Cause                              | Fix                                                                                                  |
-| --------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `setup` fails with "401 Unauthorized"   | Invalid or expired API token       | Regenerate token in FS platform (Settings > API Tokens) and update `secrets.FINITE_STATE_AUTH_TOKEN` |
-| `setup` fails with "403 Forbidden"      | Token lacks required permissions   | Ensure token has read/write access to the target project                                             |
-| Downstream action fails with auth error | `setup` step was not run or failed | Add `finite-state/setup@v2` as the first step; check that it succeeded                               |
-| Auth works locally but fails in CI      | Token stored incorrectly           | Verify the secret is set at the correct scope (repo or org) and the workflow has access              |
+| Symptom                                 | Cause                              | Fix                                                                                                   |
+| --------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `setup` fails with "401 Unauthorized"   | Invalid or expired API token       | Regenerate token in FS platform (Settings > API Tokens) and update `secrets.FINITE_STATE_AUTH_TOKEN`  |
+| `setup` fails with "403 Forbidden"      | Token lacks required permissions   | Ensure token has read/write access to the target project                                              |
+| Downstream action fails with auth error | `setup` step was not run or failed | Add `FiniteStateInc/finite-state-actions/actions/setup@v2` as the first step; check that it succeeded |
+| Auth works locally but fails in CI      | Token stored incorrectly           | Verify the secret is set at the correct scope (repo or org) and the workflow has access               |
 
 ### Scan timeouts
 
-| Symptom                              | Cause                                       | Fix                                                             |
-| ------------------------------------ | ------------------------------------------- | --------------------------------------------------------------- |
-| `upload` fails with "Scan timed out" | Large binary exceeding default 600s timeout | Increase `timeout` input (e.g., `timeout: 1800` for 30 minutes) |
-| Scan stuck in `PROCESSING`           | Platform-side processing delay              | Check FS platform dashboard for scan status; retry if needed    |
-| `upload` fails with "File not found" | Build artifact not available                | Ensure the build step runs before upload; check the file path   |
+| Symptom                              | Cause                                  | Fix                                                                        |
+| ------------------------------------ | -------------------------------------- | -------------------------------------------------------------------------- |
+| `upload` fails with "Scan timed out" | Scan outran fs-cli's 30-minute default | Raise `timeout` (whole seconds, e.g. `3600`) or drop `wait-for-completion` |
+| `scan-status` stays `RUNNING`        | Platform-side processing delay         | Check the FS platform for scan status; retry if needed                     |
+| `upload` fails with "File not found" | Build artifact not available           | Ensure the build step runs before upload; check the file path              |
 
 ### Source scan (fs-cli)
 
 | Symptom                                            | Cause                                                     | Fix                                                                                         |
 | -------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `FINITE_STATE_AUTH_TOKEN is not set`               | Neither `setup` ran nor `api-token` was passed to `scan`  | Add `finite-state/setup`, or pass `api-token` directly to `scan`                            |
+| `FINITE_STATE_AUTH_TOKEN is not set`               | Neither `setup` ran nor `api-token` was passed to `scan`  | Add the `setup` action, or pass `api-token` directly to `scan`                              |
 | `setup` fails with "not available for this runner" | Unsupported runner OS/arch for the fs-cli download        | Use a linux/darwin/windows runner on amd64 or arm64                                         |
 | `setup` fails downloading fs-cli with HTTP 403     | Pre-signed download URL expired or the token was rejected | Re-run the job; if it persists, regenerate the API token                                    |
 | `scan` fails with "name is required"               | Empty `name` input and no `GITHUB_REPOSITORY`             | Set the `name` input explicitly                                                             |
