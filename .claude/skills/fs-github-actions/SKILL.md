@@ -569,7 +569,7 @@ download-sbom (reads env + setup/upload outputs)
 2. **upload before run-report** -- the scan must complete before reports can analyze it.
 3. **run-report before quality-gate and pr-comment** -- both consume report outputs.
 4. **quality-gate before pr-comment** (optional) -- if you want gate results in the PR comment, run the gate first.
-5. **download-sbom is independent** -- it only needs setup context and optionally a version-id from upload.
+5. **download-sbom needs setup context plus a version ID** -- the version ID is required, and `upload` is the only action that outputs one. Pass `version-id` to `setup` or to `download-sbom` if no `upload` step runs.
 6. **`scan` and `upload` run without setup** -- both accept `api-token`/`domain`/`project-name` directly and download fs-cli when PATH has none. The other actions read auth from the env vars `setup` exports, though all of them accept explicit project/version inputs instead of upstream outputs.
 
 ### Referencing upstream outputs

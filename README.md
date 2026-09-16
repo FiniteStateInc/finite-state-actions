@@ -178,16 +178,24 @@ jobs:
           domain: ${{ vars.FINITE_STATE_DOMAIN }}
           project-id: ${{ vars.FINITE_STATE_PROJECT_ID }}
 
-      - uses: FiniteStateInc/finite-state-actions/actions/scan@v2
+      - uses: FiniteStateInc/finite-state-actions/actions/upload@v2
+        id: upload
         with:
+          type: sca
+          file: build/firmware.bin
           version: ${{ github.ref_name }}
 
       - uses: FiniteStateInc/finite-state-actions/actions/download-sbom@v2
         with:
+          version-id: ${{ steps.upload.outputs.version-id }}
           format: cyclonedx
           include-vex: true
           artifact-name: 'sbom-${{ github.ref_name }}'
 ```
+
+`download-sbom` needs a version ID. `upload` is the only action that outputs one, so
+export the SBOM after an `upload` step, or pass `version-id` to `setup`/`download-sbom`
+yourself. `scan` does not report the version it created.
 
 ## Reports
 
