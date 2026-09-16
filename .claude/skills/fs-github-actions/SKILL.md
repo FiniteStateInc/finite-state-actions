@@ -497,6 +497,49 @@ Those three renderers are all that exist. `detailed` and `custom` are accepted b
 
 ---
 
+### wait
+
+Blocks until the platform finishes scanning a version, so a later step never reads partial results.
+
+**Usage:** `FiniteStateInc/finite-state-actions/actions/wait@v2`
+
+**Inputs:**
+
+| Input        | Required | Default                   | Description                                                                            |
+| ------------ | -------- | ------------------------- | -------------------------------------------------------------------------------------- |
+| `api-token`  | no       | from setup/scan/upload    | FS API token. Only needed when none of those ran in this job                           |
+| `domain`     | no       | from setup                | Platform domain. Falls back to the setup context, then `app.finitestate.io`            |
+| `version-id` | no       | `FINITE_STATE_VERSION_ID` | Version to wait on. `setup`, `scan` and `upload` all export one                        |
+| `timeout`    | no       | fs-cli's 30 minutes       | Maximum wait in whole seconds, rounded up to whole minutes — all fs-cli's flag accepts |
+
+**Outputs:** none. The step passes or fails; there is no partial-success status to report.
+
+**Behavior:** A composite action — no bundle, no `dist/`. It runs `fs-cli query --type scan --format json --endpoint https://<domain> --version-id <id> --wait --fail-on-scan-incomplete`, the same call `upload` makes under `wait-for-completion`. `--wait` makes fs-cli poll; `--fail-on-scan-incomplete` fails the step on a failed scan, a poll timeout, or a version with no scans at all. The token goes through `FS_TOKEN`, never on the command line, and every input reaches the script through the environment rather than being spliced into bash source. The script lives at `actions/wait/wait.sh`; `actions/wait/__tests__/action.test.sh` checks it against a stub fs-cli, and CI runs that directly since pnpm skips a package with no `package.json`.
+
+**Example:**
+
+```yaml
+- uses: FiniteStateInc/finite-state-actions/actions/scan@v2
+  with:
+    api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
+    domain: ${{ vars.FINITE_STATE_DOMAIN }}
+    project-name: ${{ github.event.repository.name }}
+    version: ${{ github.ref_name }}
+
+- uses: FiniteStateInc/finite-state-actions/actions/wait@v2
+  with:
+    timeout: 3600 # optional; unset leaves fs-cli its 30-minute default
+```
+
+**Gotchas:**
+
+- **It does not install fs-cli.** Run `setup`, `scan` or `upload` earlier in the same job — each adds fs-cli to `PATH`. Without one, `wait` fails with `fs-cli not found` rather than installing anything.
+- **`version-id` is a platform version ID, not a label.** It defaults to `FINITE_STATE_VERSION_ID`, which `scan` and `upload` export after reading it back from fs-cli. When `scan` could not parse an ID it warns, and `wait` then fails with `No version ID`.
+- **Redundant after `upload` with `wait-for-completion: true`.** That input runs the same query inside the upload step. Use one or the other, not both.
+- **It waits on one version.** Two uploads to different versions in the same job need a `wait` step each, with `version-id` set explicitly — the env var only holds the most recent.
+
+---
+
 ### download-sbom
 
 Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
@@ -540,6 +583,7 @@ Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
 
 - **`version-id` is a platform version ID, not a version label.** `v1.2.3` will not work; the ID is what `upload` returns as its `version-id` output.
 - **A `scan`-only workflow gets its version ID from `scan`.** `scan` reads the ID back from fs-cli's output and exports it, so `download-sbom` needs no `version-id` input after a `scan` in the same job. When fs-cli prints no ID (an interrupted scan, an older fs-cli), `scan` warns and you have to pass `version-id` yourself.
+- **The scan has to finish first, and neither `scan` nor a default `upload` waits for it.** Both return once the platform accepts the files and analyse them in the background, so an export placed straight after either one returns a partial SBOM — typically no findings and no VEX data, with no error to tell you. After `upload`, set `wait-for-completion: true`. After `scan`, add the `wait` action, which needs no inputs.
 
 ---
 
@@ -563,6 +607,10 @@ setup (validates auth, exports env vars, installs fs-cli)   [optional if only sc
   |       |-- exports: the same env vars, plus FINITE_STATE_VERSION_ID
   |       |-- outputs: version-id, project-id, scan-status
   |
+  +---> wait (blocks until the platform finishes scanning the version)
+  |       |-- reads: FINITE_STATE_AUTH_TOKEN, FINITE_STATE_DOMAIN, FINITE_STATE_VERSION_ID
+  |       |-- outputs: none; fails the step on a failed or unfinished scan
+  |
   v
 run-report (reads env + setup/upload outputs)
   |-- outputs: report-dir, artifact-name, summary-json, critical-count, etc.
@@ -585,9 +633,10 @@ download-sbom (reads env + setup/upload outputs)
 2. **upload before run-report** -- the scan must complete before reports can analyze it.
 3. **run-report before quality-gate and pr-comment** -- both consume report outputs.
 4. **quality-gate before pr-comment** (optional) -- if you want gate results in the PR comment, run the gate first.
-5. **download-sbom needs a version ID** -- the platform's version ID, not a version label like `v1.2.3`. `scan` and `upload` both output one and export it as `FINITE_STATE_VERSION_ID`, so a `scan` or `upload` earlier in the job covers it. Otherwise pass `version-id` to `setup` or to `download-sbom`.
-6. **`scan`, `upload` and `download-sbom` run without setup** -- all three accept `api-token`/`domain` directly (`scan` and `upload` also take `project-name`), and `scan`/`upload` download fs-cli when PATH has none. The other actions read auth from the env vars `setup` exports, though all of them accept explicit project/version inputs instead of upstream outputs.
-7. **`scan` and `upload` export the full context too** -- both write the same `FINITE_STATE_*` env vars `setup` does, including `FINITE_STATE_PROJECT_ID` and `FINITE_STATE_VERSION_ID`, so a later step inherits everything without repeating it. Both read those two IDs back from fs-cli's own output, which is the only place the platform reports them. No other action exports anything.
+5. **wait for the scan before download-sbom or run-report** -- `scan` and `upload` both return as soon as the upload is accepted. Use `wait-for-completion: true` on `upload`, or the `wait` action after `scan`.
+6. **download-sbom needs a version ID** -- the platform's version ID, not a version label like `v1.2.3`. `scan` and `upload` both output one and export it as `FINITE_STATE_VERSION_ID`, so a `scan` or `upload` earlier in the job covers it. Otherwise pass `version-id` to `setup` or to `download-sbom`.
+7. **`scan`, `upload` and `download-sbom` run without setup** -- all three accept `api-token`/`domain` directly (`scan` and `upload` also take `project-name`), and `scan`/`upload` download fs-cli when PATH has none. The other actions read auth from the env vars `setup` exports, though all of them accept explicit project/version inputs instead of upstream outputs.
+8. **`scan` and `upload` export the full context too** -- both write the same `FINITE_STATE_*` env vars `setup` does, including `FINITE_STATE_PROJECT_ID` and `FINITE_STATE_VERSION_ID`, so a later step inherits everything without repeating it. Both read those two IDs back from fs-cli's own output, which is the only place the platform reports them. No other action exports anything.
 
 ### Referencing upstream outputs
 
@@ -687,6 +736,7 @@ jobs:
           type: sca
           file: build/firmware.bin
           version: 'pr-${{ github.event.number }}'
+          wait-for-completion: true
 
       - uses: FiniteStateInc/finite-state-actions/actions/run-report@v2
         id: report
@@ -790,6 +840,7 @@ jobs:
           type: sca
           file: build/firmware.bin
           version: '${{ github.ref_name }}'
+          wait-for-completion: true
 
       - uses: FiniteStateInc/finite-state-actions/actions/download-sbom@v2
         with:
@@ -809,6 +860,8 @@ A source scan works the same way, with no `version-id` anywhere — `scan` expor
     project-name: ${{ github.event.repository.name }}
     version: ${{ github.ref_name }}
 
+- uses: FiniteStateInc/finite-state-actions/actions/wait@v2
+
 - uses: FiniteStateInc/finite-state-actions/actions/download-sbom@v2
   with:
     format: cyclonedx
@@ -816,11 +869,17 @@ A source scan works the same way, with no `version-id` anywhere — `scan` expor
     artifact-name: 'sbom-${{ github.ref_name }}'
 ```
 
+`scan` has no `wait-for-completion` input, so the `wait` action does the waiting. It needs
+no inputs: `scan` puts `fs-cli` on `PATH` and exports `FINITE_STATE_AUTH_TOKEN`,
+`FINITE_STATE_DOMAIN` and `FINITE_STATE_VERSION_ID` for later steps in the same job. Pass
+`timeout` (whole seconds) to bound the wait; unset leaves fs-cli its 30-minute default.
+
 **Key points:**
 
 - Triggered on release for versioned SBOMs
 - Version named after the release tag for traceability
 - `include-vex: true` bundles triage decisions into the SBOM
+- The export waits for the scan — `wait-for-completion: true` after `upload`, the `wait` action after `scan`. Without it the SBOM is whatever the platform had finished, usually with no findings and no VEX data
 - SBOM artifact can be attached to the GitHub release or consumed by downstream systems
 
 ---
@@ -857,6 +916,7 @@ jobs:
           type: sca
           file: build/firmware.bin
           version: 'pr-${{ github.event.number }}'
+          wait-for-completion: true
 
       # 3. Generate reports (multiple recipes)
       - uses: FiniteStateInc/finite-state-actions/actions/run-report@v2
@@ -933,11 +993,14 @@ curl -s -H "X-Authorization: $FS_TOKEN" \
 
 ### Scan timeouts
 
-| Symptom                              | Cause                                  | Fix                                                                        |
-| ------------------------------------ | -------------------------------------- | -------------------------------------------------------------------------- |
-| `upload` fails with "Scan timed out" | Scan outran fs-cli's 30-minute default | Raise `timeout` (whole seconds, e.g. `3600`) or drop `wait-for-completion` |
-| `scan-status` stays `RUNNING`        | Platform-side processing delay         | Check the FS platform for scan status; retry if needed                     |
-| `upload` fails with "File not found" | Build artifact not available           | Ensure the build step runs before upload; check the file path              |
+| Symptom                              | Cause                                                 | Fix                                                                         |
+| ------------------------------------ | ----------------------------------------------------- | --------------------------------------------------------------------------- |
+| `upload` fails with "Scan timed out" | Scan outran fs-cli's 30-minute default                | Raise `timeout` (whole seconds, e.g. `3600`) or drop `wait-for-completion`  |
+| `scan-status` stays `RUNNING`        | Platform-side processing delay                        | Check the FS platform for scan status; retry if needed                      |
+| `upload` fails with "File not found" | Build artifact not available                          | Ensure the build step runs before upload; check the file path               |
+| `wait` fails with "fs-cli not found" | No `setup`, `scan` or `upload` ran earlier in the job | Add one of them before `wait` — `wait` does not install fs-cli              |
+| `wait` fails with "No version ID"    | `scan` could not parse an ID, or no scan/upload ran   | Pass `version-id` explicitly; the `scan` step warns when it cannot read one |
+| SBOM or report has no findings       | Exported before the platform finished scanning        | `wait-for-completion: true` on `upload`, or the `wait` action after `scan`  |
 
 ### Source scan (fs-cli)
 

@@ -10,6 +10,7 @@ A collection of GitHub Actions for integrating [Finite State](https://finitestat
 | [scan](./actions/scan)                   | Scan project dependencies with fs-cli and upload results (runs standalone)       |
 | [upload](./actions/upload)               | Upload a firmware, SBOM, or third-party scan file through fs-cli (standalone)    |
 | [upload-scan](./actions/upload-scan)     | Deprecated alias for `upload`; forwards inputs and outputs, warns, removed in v3 |
+| [wait](./actions/wait)                   | Wait for the platform to finish scanning a version                               |
 | [run-report](./actions/run-report)       | Generate security reports using fs-report                                        |
 | [quality-gate](./actions/quality-gate)   | Fail the build if findings exceed configurable thresholds                        |
 | [pr-comment](./actions/pr-comment)       | Post a findings summary as a pull request comment                                |
@@ -207,6 +208,7 @@ jobs:
           type: sca
           file: build/firmware.bin
           version: ${{ github.ref_name }}
+          wait-for-completion: true
 
       - uses: FiniteStateInc/finite-state-actions/actions/download-sbom@v2
         with:
@@ -216,9 +218,52 @@ jobs:
           artifact-name: 'sbom-${{ github.ref_name }}'
 ```
 
-`download-sbom` needs a version ID. `upload` is the only action that outputs one, so
-export the SBOM after an `upload` step, or pass `version-id` to `setup`/`download-sbom`
-yourself. `scan` does not report the version it created.
+`download-sbom` needs a version ID. `scan` and `upload` both output one and export it as
+`FINITE_STATE_VERSION_ID`, so a `scan` or `upload` earlier in the job covers it. Otherwise
+pass `version-id` to `setup` or to `download-sbom` yourself.
+
+### Wait for the scan before exporting
+
+Both `scan` and `upload` return as soon as the platform accepts the files. The platform
+then analyses them in the background. Export the SBOM straight after either step and you
+get whatever the platform has finished so far — usually an SBOM with no findings and no
+VEX data. Wait for the scan to settle first.
+
+After `upload`, set `wait-for-completion: true` (as above) and the action polls for you.
+
+After `scan`, which has no such input, add the `wait` action. It needs no inputs — `scan`
+puts `fs-cli` on `PATH` and exports the token, domain and version ID:
+
+```yaml
+- uses: FiniteStateInc/finite-state-actions/actions/scan@v2
+  with:
+    api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
+    domain: ${{ vars.FINITE_STATE_DOMAIN }}
+    project-name: ${{ github.event.repository.name }}
+    version: ${{ github.ref_name }}
+
+- uses: FiniteStateInc/finite-state-actions/actions/wait@v2
+
+- uses: FiniteStateInc/finite-state-actions/actions/download-sbom@v2
+  with:
+    format: cyclonedx
+    include-vex: true
+    artifact-name: 'sbom-${{ github.ref_name }}'
+```
+
+`wait` fails the step on a failed scan, a poll timeout, or a version with no scans at all,
+so a later step never reads partial results from a green job.
+
+| Input        | Required | Default                      | Description                                                                 |
+| ------------ | -------- | ---------------------------- | --------------------------------------------------------------------------- |
+| `api-token`  | no       | from setup/scan/upload       | Only needed when none of those ran in this job                              |
+| `domain`     | no       | from setup, then the default | Platform domain                                                             |
+| `version-id` | no       | `FINITE_STATE_VERSION_ID`    | The version to wait on                                                      |
+| `timeout`    | no       | fs-cli's own 30 minutes      | Maximum wait in whole seconds, rounded up to the whole minutes fs-cli takes |
+
+`wait` does not install `fs-cli` — run `setup`, `scan` or `upload` earlier in the same job,
+each of which adds it to `PATH`. It also waits on one version at a time, the one in
+`FINITE_STATE_VERSION_ID` unless you pass `version-id`.
 
 ## Reports
 

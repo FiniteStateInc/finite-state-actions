@@ -1,0 +1,32 @@
+name: 'Finite State Wait'
+description: 'Wait for the platform to finish scanning a version before later steps read its results'
+author: 'Finite State Inc.'
+branding:
+  icon: 'clock'
+  color: 'blue'
+inputs:
+  api-token:
+    description: 'Finite State API token. Only needed when setup, scan or upload did not run in this job.'
+    required: false
+  domain:
+    description: 'Finite State platform domain. Defaults to the setup context, then app.finitestate.io.'
+    required: false
+  version-id:
+    description: 'Version to wait on. Defaults to FINITE_STATE_VERSION_ID, which setup, scan and upload export.'
+    required: false
+  timeout:
+    description: 'Optional maximum wait in seconds. Rounded up to whole minutes, which is all fs-cli accepts. Unset leaves fs-cli its own 30-minute default.'
+    required: false
+runs:
+  using: 'composite'
+  steps:
+    - name: Wait for the scan to finish
+      shell: bash
+      # Inputs go through env rather than into the script body: a ${{ }} spliced
+      # into bash source would run whatever the input happened to contain.
+      env:
+        INPUT_API_TOKEN: ${{ inputs.api-token }}
+        INPUT_DOMAIN: ${{ inputs.domain }}
+        INPUT_VERSION_ID: ${{ inputs.version-id }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+      run: bash "$GITHUB_ACTION_PATH/wait.sh"

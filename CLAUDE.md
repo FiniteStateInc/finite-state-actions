@@ -55,7 +55,7 @@ cd actions/setup && pnpm build
 
 ### Actions (`actions/*`)
 
-Seven GitHub Actions, each with `action.yml` + `src/main.ts` + `tsconfig.json` + `__tests__/` + committed `dist/`:
+Seven bundled GitHub Actions, each with `action.yml` + `src/main.ts` + `tsconfig.json` + `__tests__/` + committed `dist/`:
 
 | Action          | Purpose                                                                                                                                                                          |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -67,7 +67,11 @@ Seven GitHub Actions, each with `action.yml` + `src/main.ts` + `tsconfig.json` +
 | `pr-comment`    | Post/update PR comment with findings summary and gate results                                                                                                                    |
 | `download-sbom` | Export CycloneDX/SPDX SBOM, upload as artifact; takes `api-token`/`domain` when no setup ran                                                                                     |
 
-Plus `actions/upload-scan/` — a deprecated alias for `upload`, kept for consumers pinned to the old path. It is `action.yml` only: a composite that warns and forwards to `.../actions/upload@v2`. No `package.json`, so pnpm's `actions/*` glob skips it and it needs no bundle. Remove it in v3.
+Plus two composite actions, neither of which has a `package.json` — pnpm's `actions/*` glob skips them and they need no bundle:
+
+`actions/wait/` — waits for the platform to finish scanning a version, for the `scan` path, which has no `wait-for-completion` input of its own. `action.yml` passes every input through the environment and runs `wait.sh`, which shells out to `fs-cli query --type scan --wait --fail-on-scan-incomplete`. It does not install fs-cli; it requires one already on `PATH` from `setup`, `scan` or `upload`. The script is a separate file so `__tests__/action.test.sh` can run it against a stub fs-cli — CI invokes that script directly in the `test` job, since `pnpm -r run test` cannot see a package with no `package.json`. Note the `${POLL_TIMEOUT[@]+"${POLL_TIMEOUT[@]}"}` guard: under `set -u` an empty array expansion is an error in bash 3.2, which is what macOS runners ship.
+
+`actions/upload-scan/` — a deprecated alias for `upload`, kept for consumers pinned to the old path. It is `action.yml` only: a composite that warns and forwards to `.../actions/upload@v2`. No `package.json`, so pnpm's `actions/*` glob skips it and it needs no bundle. Remove it in v3.
 
 Actions chain via environment variables (set by `setup`) and step outputs (JSON, e.g. `details-json`).
 
@@ -77,7 +81,7 @@ Three actions shell out via `@actions/exec` rather than the REST API: `scan` and
 
 ### Build & Release
 
-- All seven actions declare `using: 'node24'`. Bundles are built by ncc, not transpiled per-runtime, so the runtime lives only in `action.yml`.
+- All seven bundled actions declare `using: 'node24'`. Bundles are built by ncc, not transpiled per-runtime, so the runtime lives only in `action.yml`. The two composite actions (`wait`, `upload-scan`) declare `using: 'composite'` and have no bundle.
 - Actions are bundled with `@vercel/ncc` into `dist/index.js`. **These bundles are committed** and CI fails the `build` job if `git diff actions/*/dist/` is non-empty — always run `pnpm build` and commit the bundle with any source change.
 - Root `.gitignore` lists `dist/` and `*.js`. Existing action bundles are already tracked so the rule doesn't affect them, but a **new** action's `dist/` needs `git add -f`.
 - Tagging `v*` runs CI, creates a GitHub Release, and force-moves the major tag (`v2`). Consumers pin `FiniteStateInc/finite-state-actions/actions/<name>@v2`, so a broken committed bundle ships immediately. The current major is `v2`; `v2` is also moved by hand when shipping fixes without a new semver tag.

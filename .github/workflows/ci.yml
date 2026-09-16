@@ -46,6 +46,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm -C packages/core run build
       - run: pnpm test
+      # actions/wait is a composite action with no package.json, so pnpm -r
+      # skips it. Its checks are a shell script.
+      - run: bash actions/wait/__tests__/action.test.sh
 
   build:
     runs-on: ubuntu-latest
