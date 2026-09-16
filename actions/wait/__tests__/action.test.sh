@@ -7,6 +7,11 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/../wait.sh"
+# wait.sh runs under the interpreter running this file, not under whatever
+# `bash` resolves to on PATH. That is the point of the macOS CI leg: /bin/bash
+# there is 3.2, where `set -u` rejects an empty array expansion, while PATH
+# normally leads to a Homebrew bash 5 that never reaches the guard.
+SUT_BASH="${SUT_BASH:-${BASH:-/bin/bash}}"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/fs-wait-action-test.XXXXXX")"
 ARGS="$WORK/args.txt"
 trap 'rm -rf "$WORK"' EXIT
@@ -28,6 +33,10 @@ export PATH
 
 failures=0
 
+# Says which interpreter actually ran wait.sh, so a CI log shows the coverage
+# rather than leaving it to be inferred from a bash version printed elsewhere.
+echo "wait.sh under test with: $SUT_BASH $("$SUT_BASH" -c 'echo "$BASH_VERSION"')"
+
 # Runs wait.sh with a clean input environment plus whatever the caller passes as
 # NAME=value pairs. `env` is used rather than a prefixed call so the assignments
 # cannot leak into this shell — whether they do for a function is bash-version
@@ -39,7 +48,7 @@ run_wait() {
   rm -f "$ARGS"
   env -u INPUT_API_TOKEN -u INPUT_DOMAIN -u INPUT_VERSION_ID -u INPUT_TIMEOUT \
     -u FINITE_STATE_AUTH_TOKEN -u FINITE_STATE_DOMAIN -u FINITE_STATE_VERSION_ID \
-    "$@" bash "$SCRIPT" 2>&1
+    "$@" "$SUT_BASH" "$SCRIPT" 2>&1
 }
 
 # Substring match — for log lines and argument lists.

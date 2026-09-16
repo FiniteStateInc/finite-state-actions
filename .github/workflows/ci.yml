@@ -59,7 +59,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
-      - run: bash --version
+      # Both, because they differ on macOS: PATH leads to a Homebrew bash 5
+      # there, while /bin/bash is 3.2. The checks run under /bin/bash below and
+      # hand that same interpreter to wait.sh, so /bin/bash is the one that
+      # decides what gets covered.
+      - name: bash versions
+        run: |
+          echo "PATH bash: $(bash -c 'echo "$BASH_VERSION"')"
+          echo "/bin/bash: $(/bin/bash -c 'echo "$BASH_VERSION"')"
       # The macOS leg is only worth running if it is genuinely bash 3.2 — that
       # is the coverage CLAUDE.md claims. If the image ever ships a newer
       # /bin/bash, fail here rather than let the claim rot silently.
