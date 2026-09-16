@@ -35,7 +35,11 @@ failures=0
 
 # Says which interpreter actually ran wait.sh, so a CI log shows the coverage
 # rather than leaving it to be inferred from a bash version printed elsewhere.
-echo "wait.sh under test with: $SUT_BASH $("$SUT_BASH" -c 'echo "$BASH_VERSION"')"
+# BASH_VERSION is single-quoted on purpose: it has to expand inside the child
+# shell, which is the whole question being answered.
+# shellcheck disable=SC2016
+sut_version="$("$SUT_BASH" -c 'echo "$BASH_VERSION"')"
+echo "wait.sh under test with: $SUT_BASH $sut_version"
 
 # Runs wait.sh with a clean input environment plus whatever the caller passes as
 # NAME=value pairs. `env` is used rather than a prefixed call so the assignments
