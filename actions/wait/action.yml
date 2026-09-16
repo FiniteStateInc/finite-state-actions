@@ -12,7 +12,7 @@ inputs:
     description: 'Finite State platform domain. Defaults to the setup context, then app.finitestate.io.'
     required: false
   version-id:
-    description: 'Version to wait on. Defaults to FINITE_STATE_VERSION_ID, which setup, scan and upload export.'
+    description: 'Version to wait on. Defaults to FINITE_STATE_VERSION_ID, which scan and upload export; setup exports it only when given a version-id.'
     required: false
   timeout:
     description: 'Optional maximum wait in seconds. Rounded up to whole minutes, which is all fs-cli accepts. Unset leaves fs-cli its own 30-minute default.'

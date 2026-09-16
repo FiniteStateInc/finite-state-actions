@@ -141,7 +141,9 @@ check "fails without a version ID" "::error title=No version ID" "$out"
 check_no_fs_cli "does not call fs-cli without a version ID"
 
 out=$(run_wait FINITE_STATE_DOMAIN=d FINITE_STATE_VERSION_ID=v)
+check_eq "exits 1 without a token" 1 "$?"
 check "fails without a token" "::error title=No API token" "$out"
+check_no_fs_cli "does not call fs-cli without a token"
 
 out=$(run_wait "${CTX[@]}" PATH=/usr/bin:/bin)
 check_eq "exits 1 when fs-cli is not on PATH" 1 "$?"

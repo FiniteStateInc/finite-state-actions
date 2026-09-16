@@ -277,9 +277,14 @@ Four things to know:
 - **`timeout` bounds this step only.** `upload`'s `timeout` covers its own upload and, with
   `wait-for-completion`, its own poll; it does not carry over to a separate `wait` step.
 
-`wait` asks the platform for the version's scans, so the step that created the version has
-to have run first. Straight after `scan` or `upload` that holds — both return only once the
-platform has accepted the files and reported back the version ID that `wait` then uses.
+One assumption worth naming: `wait` asks the platform for the version's _scans_, and
+`--fail-on-scan-incomplete` treats a version with no scans at all as a failure. `scan` and
+`upload` return once the platform has accepted the files and reported the version ID, which
+proves the version exists — not that a scan row has been recorded against it yet. The wait
+therefore relies on fs-cli's `--wait` tolerating that window. `upload` has shipped with
+`wait-for-completion` making the identical call since v2, so this is the same behaviour in a
+separate step rather than a new risk. If you do see `wait` fail immediately with a
+no-scans error, that window is the thing to suspect.
 
 ## Reports
 

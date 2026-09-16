@@ -60,7 +60,19 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: bash --version
-      - run: bash actions/wait/__tests__/action.test.sh
+      # The macOS leg is only worth running if it is genuinely bash 3.2 — that
+      # is the coverage CLAUDE.md claims. If the image ever ships a newer
+      # /bin/bash, fail here rather than let the claim rot silently.
+      - name: assert macOS runs bash 3.x
+        if: matrix.os == 'macos-latest'
+        run: |
+          version=$(/bin/bash -c 'echo ${BASH_VERSINFO[0]}')
+          echo "/bin/bash major version: $version"
+          if [ "$version" -ge 4 ]; then
+            echo "::error title=bash 3.2 coverage lost::/bin/bash on this image is version $version, so the empty-array guard in wait.sh is no longer exercised anywhere. Update the claim in CLAUDE.md and ci.yml, or pin a bash 3.2 to run these checks under."
+            exit 1
+          fi
+      - run: /bin/bash actions/wait/__tests__/action.test.sh
       - name: shellcheck
         run: shellcheck actions/wait/wait.sh actions/wait/__tests__/action.test.sh
         if: matrix.os == 'ubuntu-latest'
