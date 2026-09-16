@@ -48,6 +48,8 @@ inputs:
 outputs:
   version-id:
     description: 'ID of the project version'
+  project-id:
+    description: 'ID of the project the upload landed in, from the project-id input, setup, or fs-cli output'
   scan-status:
     description: 'Scan rollup for the version: COMPLETED, FAILED, RUNNING, NOT_FOUND, or SUBMITTED when wait-for-completion is false'
 runs:

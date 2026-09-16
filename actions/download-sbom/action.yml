@@ -5,6 +5,12 @@ branding:
   icon: 'download'
   color: 'blue'
 inputs:
+  api-token:
+    description: 'Finite State API token. Only needed when the setup action did not run in this job.'
+    required: false
+  domain:
+    description: 'Finite State platform domain. Defaults to the setup context, then app.finitestate.io.'
+    required: false
   version-id:
     description: 'Version ID override (falls back to setup context)'
     required: false

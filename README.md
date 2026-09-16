@@ -35,6 +35,29 @@ In your GitHub repository, go to Settings > Secrets and variables > Actions:
 
 The domain must be the tenant the token was issued from (e.g. `acme.finitestate.io`, not `app.finitestate.io`) — a token used against the wrong tenant authenticates but sees no projects.
 
+### Runners behind a proxy
+
+Set `HTTPS_PROXY` (or `HTTP_PROXY`) and, if needed, `NO_PROXY` on the job. Every action
+reads them and sends its platform requests through that proxy — including the fs-cli
+download in `setup`. Lower-case `https_proxy`/`http_proxy` work too.
+
+```yaml
+jobs:
+  security:
+    runs-on: self-hosted
+    env:
+      HTTPS_PROXY: http://proxy.corp.example:3128
+      NO_PROXY: localhost,127.0.0.1
+```
+
+Two hosts must be reachable through it: your platform domain (e.g. `app.finitestate.io`)
+and the pre-signed object-storage host that domain hands back for the fs-cli binary.
+A blocked host shows up as `Could not install fs-cli from <domain>: fetch failed`.
+
+The proxy must allow `CONNECT` — the actions tunnel through it rather than sending
+absolute-form requests. For a proxy that needs credentials, put them in the URL
+(`http://user:pass@proxy.corp.example:3128`); the log line strips them.
+
 ### Usage
 
 Since the actions live in a monorepo, reference them with the full path:
@@ -237,7 +260,9 @@ Any fs-report flag without a dedicated input — `--min-severity`, `--scan-type`
 
 Actions pass data via step outputs and environment variables. The `setup` action exports `FINITE_STATE_AUTH_TOKEN` and `FINITE_STATE_DOMAIN` as environment variables for the entire job.
 
-`setup` is optional for `scan` and `upload`, which accept `api-token`/`domain`/`project-name` directly and install `fs-cli` when it is not already on `PATH`. Every other action requires `setup`.
+`setup` is optional for `scan`, `upload` and `download-sbom`, which accept `api-token`/`domain` directly (`scan` and `upload` also take `project-name`) and install `fs-cli` when it is not already on `PATH`. Every other action requires `setup`.
+
+`scan` and `upload` also export that context themselves, so a later step inherits the token and domain without repeating them — the same environment variables `setup` writes. `upload` adds `FINITE_STATE_VERSION_ID` and the `version-id` output once fs-cli reports the version it used, plus the project ID when the platform created the project. `scan` exports no version ID: fs-cli only ever sees the version _label_, so after a `scan` you have to supply `version-id` to `download-sbom` yourself.
 
 ```
 setup (validates auth, exports env vars, installs fs-cli)

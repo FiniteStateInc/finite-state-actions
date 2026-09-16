@@ -98,11 +98,12 @@ Runs `fs-cli scan` to analyze project dependencies and upload results to the Fin
 
 **Outputs:**
 
-| Output      | Description           |
-| ----------- | --------------------- |
-| `exit-code` | Exit code from fs-cli |
+| Output       | Description                                                                               |
+| ------------ | ----------------------------------------------------------------------------------------- |
+| `exit-code`  | Exit code from fs-cli                                                                     |
+| `project-id` | Project ID used, when one was known. Empty when the platform created the project instead. |
 
-**Behavior:** Reads auth context from the `setup` action's exported environment variables. Always passes `--name` to `fs-cli` (required); adds `--project-id` when available. The `name` input defaults to the repository name extracted from `GITHUB_REPOSITORY`.
+**Behavior:** Reads auth context from the `setup` action's exported environment variables, then exports it again for later steps. Always passes `--name` to `fs-cli` (required); adds `--project-id` when available. The `name` input defaults to the repository name extracted from `GITHUB_REPOSITORY`.
 
 **Gotchas:**
 
@@ -112,6 +113,7 @@ Runs `fs-cli scan` to analyze project dependencies and upload results to the Fin
 - **`project-id` is forwarded verbatim to `fs-cli --project-id`.** Platform project IDs are signed 64-bit integers (e.g. `-4065045466680884751`), not UUIDs. To target a project by name, use `project-name` on `scan` or `setup` rather than putting a name here.
 - **Invocation order is `fs-cli scan --endpoint … --token … --name … --version …`, then `--project-id` and any `extra-args`, with the scan target path last.**
 - **`extra-args` is split on whitespace.** There is no shell-style quoting, so an argument containing a space becomes two arguments. Pass such values through a dedicated input or a config file instead.
+- **`scan` exports the auth context, so later steps do not need it again.** It writes `FINITE_STATE_AUTH_TOKEN`, `FINITE_STATE_DOMAIN`, `FINITE_STATE_PROJECT_NAME` and (when known) `FINITE_STATE_PROJECT_ID` before fs-cli runs, so even an `if: always()` step inherits them. It does **not** write `FINITE_STATE_VERSION_ID` — fs-cli takes a version label, and the platform's ID for that version is not something `scan` learns.
 - **The step fails on any non-zero `fs-cli` exit, but `exit-code` is still set.** Use `continue-on-error: true` plus `steps.<id>.outputs.exit-code` when you want to inspect the code rather than fail the job.
 
 **Example:**
@@ -164,10 +166,13 @@ Uploads a binary, SBOM, or third-party scan results for analysis. Handles all up
 
 **Outputs:**
 
-| Output        | Description                                                                    |
-| ------------- | ------------------------------------------------------------------------------ |
-| `version-id`  | The version ID (created or existing), read back from `fs-cli` output           |
-| `scan-status` | `COMPLETED`, `FAILED`, `RUNNING`, `NOT_FOUND`, or `SUBMITTED` when not waiting |
+| Output        | Description                                                                            |
+| ------------- | -------------------------------------------------------------------------------------- |
+| `version-id`  | The version ID (created or existing), read back from `fs-cli` output                   |
+| `project-id`  | The project ID used: from the `project-id` input, from setup, or read back from fs-cli |
+| `scan-status` | `COMPLETED`, `FAILED`, `RUNNING`, `NOT_FOUND`, or `SUBMITTED` when not waiting         |
+
+> `upload` also exports the auth context (`FINITE_STATE_AUTH_TOKEN`, `FINITE_STATE_DOMAIN`, `FINITE_STATE_PROJECT_NAME`) before the upload runs, and `FINITE_STATE_PROJECT_ID`/`FINITE_STATE_VERSION_ID` once fs-cli reports them — so a later `download-sbom` or `run-report` step needs no auth inputs of its own.
 
 > `scan-id` and `scan-ids` are no longer produced: `fs-cli` reports scans as a per-type rollup, not as individual scan record IDs. Use `version-id` downstream — every other action keys off it.
 
@@ -498,14 +503,16 @@ Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
 
 **Inputs:**
 
-| Input             | Required | Default             | Description                                  |
-| ----------------- | -------- | ------------------- | -------------------------------------------- |
-| `version-id`      | no       | from setup/upload   | Falls back to setup context or upload output |
-| `format`          | no       | `cyclonedx`         | `cyclonedx` or `spdx`                        |
-| `include-vex`     | no       | `true`              | Include VEX triage data in SBOM              |
-| `output-file`     | no       | `sbom.json`         | Output file path                             |
-| `upload-artifact` | no       | `true`              | Upload as workflow artifact                  |
-| `artifact-name`   | no       | `finite-state-sbom` | Artifact name                                |
+| Input             | Required | Default             | Description                                                             |
+| ----------------- | -------- | ------------------- | ----------------------------------------------------------------------- |
+| `api-token`       | no       | from setup          | FS API token. Required only when `setup`/`scan`/`upload` did not run    |
+| `domain`          | no       | from setup          | Platform domain. Falls back to setup context, then `app.finitestate.io` |
+| `version-id`      | no       | from setup/upload   | Falls back to setup context or upload output                            |
+| `format`          | no       | `cyclonedx`         | `cyclonedx` or `spdx`                                                   |
+| `include-vex`     | no       | `true`              | Include VEX triage data in SBOM                                         |
+| `output-file`     | no       | `sbom.json`         | Output file path                                                        |
+| `upload-artifact` | no       | `true`              | Upload as workflow artifact                                             |
+| `artifact-name`   | no       | `finite-state-sbom` | Artifact name                                                           |
 
 **Outputs:**
 
@@ -515,7 +522,7 @@ Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
 | `artifact-name`   | Artifact name — set even when `upload-artifact` is `false` |
 | `component-count` | Number of components in the SBOM                           |
 
-**Behavior:** Calls `GET /sboms/cyclonedx/{pvId}` or `GET /sboms/spdx/{pvId}`. Writes to output file. Optionally uploads as workflow artifact. This is the one action that calls the API directly (not through fs-report) since fs-report does not handle SBOM export.
+**Behavior:** Calls `GET /sboms/cyclonedx/{pvId}` or `GET /sboms/spdx/{pvId}`. Auth comes from `api-token`/`domain` when given, otherwise from the env vars `setup`, `scan` or `upload` exported. Writes to output file. Optionally uploads as workflow artifact. This is the one action that calls the API directly (not through fs-report) since fs-report does not handle SBOM export.
 
 **Example:**
 
@@ -526,6 +533,11 @@ Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
     include-vex: true
     output-file: sbom-with-vex.json
 ```
+
+**Gotchas:**
+
+- **`version-id` is a platform version ID, not a version label.** `v1.2.3` will not work; the ID is what `upload` returns as its `version-id` output.
+- **A `scan`-only workflow has no version ID to pass.** `scan` exports auth but not a version ID, so either use `upload`, set `version-id` on `setup`, or look the ID up against the API in a `run:` step.
 
 ---
 
@@ -542,10 +554,12 @@ setup (validates auth, exports env vars, installs fs-cli)   [optional if only sc
   |-- outputs: project-id, version-id
   |
   +---> scan (runs fs-cli dependency scan, uploads results)
-  |       |-- outputs: exit-code
+  |       |-- exports: the same env vars, minus FINITE_STATE_VERSION_ID
+  |       |-- outputs: exit-code, project-id
   |
   +---> upload (uploads binary/SBOM/third-party results)
-  |       |-- outputs: version-id, scan-status
+  |       |-- exports: the same env vars, plus FINITE_STATE_VERSION_ID
+  |       |-- outputs: version-id, project-id, scan-status
   |
   v
 run-report (reads env + setup/upload outputs)
@@ -565,12 +579,13 @@ download-sbom (reads env + setup/upload outputs)
 
 ### Key chaining rules
 
-1. **setup comes first when used** -- it provides auth context via env vars, and installs fs-cli. Every action except `scan` and `upload` requires it.
+1. **setup comes first when used** -- it provides auth context via env vars, and installs fs-cli. Every action except `scan`, `upload` and `download-sbom` requires it.
 2. **upload before run-report** -- the scan must complete before reports can analyze it.
 3. **run-report before quality-gate and pr-comment** -- both consume report outputs.
 4. **quality-gate before pr-comment** (optional) -- if you want gate results in the PR comment, run the gate first.
-5. **download-sbom needs setup context plus a version ID** -- the version ID is required, and `upload` is the only action that outputs one. Pass `version-id` to `setup` or to `download-sbom` if no `upload` step runs.
-6. **`scan` and `upload` run without setup** -- both accept `api-token`/`domain`/`project-name` directly and download fs-cli when PATH has none. The other actions read auth from the env vars `setup` exports, though all of them accept explicit project/version inputs instead of upstream outputs.
+5. **download-sbom needs a version ID** -- the platform's version UUID, not a version label like `v1.2.3`. `upload` is the only action that outputs one. Pass `version-id` to `setup` or to `download-sbom` if no `upload` step runs; a `scan`-only workflow has to look the ID up itself.
+6. **`scan`, `upload` and `download-sbom` run without setup** -- all three accept `api-token`/`domain` directly (`scan` and `upload` also take `project-name`), and `scan`/`upload` download fs-cli when PATH has none. The other actions read auth from the env vars `setup` exports, though all of them accept explicit project/version inputs instead of upstream outputs.
+7. **`scan` and `upload` export the auth context too** -- both write the same `FINITE_STATE_*` env vars `setup` does, so a later step inherits the token, domain and project without repeating them. `upload` also writes `FINITE_STATE_VERSION_ID`, and the project ID fs-cli reported when the platform created the project. `scan` writes no version ID, since fs-cli only ever sees the version label. No other action exports anything.
 
 ### Referencing upstream outputs
 
@@ -881,6 +896,21 @@ jobs:
 | `setup` fails with "403 Forbidden"      | Token lacks required permissions   | Ensure token has read/write access to the target project                                              |
 | Downstream action fails with auth error | `setup` step was not run or failed | Add `FiniteStateInc/finite-state-actions/actions/setup@v2` as the first step; check that it succeeded |
 | Auth works locally but fails in CI      | Token stored incorrectly           | Verify the secret is set at the correct scope (repo or org) and the workflow has access               |
+
+### Network and proxy failures
+
+| Symptom                                                | Cause                                                           | Fix                                                                                                             |
+| ------------------------------------------------------ | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `Could not install fs-cli from <domain>: fetch failed` | Runner cannot reach the platform: proxy, DNS, or blocked egress | Set `HTTPS_PROXY`/`NO_PROXY` on the job; allowlist the platform domain **and** the pre-signed storage host      |
+| `setup` fails but a `scan` step with `api-token` works | `scan` reuses an fs-cli already on PATH, so it never downloads  | Same fix — `setup` always downloads, so it is the first step to hit an egress block                             |
+| `FS_SKIP_UPDATE=1` does not skip the download          | That variable belongs to fs-cli; no action reads it             | There is no skip flag — fix the network path, or drop `setup` and set the `FINITE_STATE_*` variables on the job |
+
+To find the second host, run the download endpoint by hand and read `download_url`:
+
+```bash
+curl -s -H "X-Authorization: $FS_TOKEN" \
+  "https://app.finitestate.io/api/public/v0/cli/download?os=linux&arch=amd64"
+```
 
 ### Scan timeouts
 

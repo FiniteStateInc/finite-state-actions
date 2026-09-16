@@ -48,6 +48,7 @@ cd actions/setup && pnpm build
 - **models.ts** — Shared enums (`Severity`, `ScanType`, `GateMode`, `SbomFormat`, etc.) and interfaces (`Finding`, `GateResult`, `ReportSummary`, etc.).
 - **client.ts / `authUserIdentity`** — `GET /authUser` returns `{ user, organization }`, not `{ email, organizationId }`. No action calls it any more: `setup` dropped the identity probe and now uses the authenticated `/cli/download` request as its token check. The client method and helpers stay for callers that want the identity — use the helpers, since reading `.email` directly is what made `setup` log `Authenticated as: undefined`.
 - **install-cli.ts** — `installFsCli()` downloads fs-cli from `GET /cli/download?os=&arch=` into `$RUNNER_TEMP/fs-cli` and `core.addPath`s it; `ensureFsCli()` reuses an fs-cli already on `PATH` and installs only when absent. `setup` uses the former, `scan` and `upload` the latter. `process.platform`/`process.arch` map to the endpoint's `linux|darwin|windows` and `amd64|arm64`; anything else fails with a named error. Before the bytes are written, `assertBinaryMatchesRunner` reads the executable header (ELF `e_machine`, Mach-O `cputype`, PE `Machine`) and refuses a build for another OS or architecture — as well as a JSON/HTML error page served in place of the binary, a DOS stub with no PE signature, or a machine value the check does not recognise. Only a universal Mach-O may leave the architecture unverified. Note the Mach-O byte order: a native little-endian thin binary starts with the bytes `cf fa ed fe`, which read big-endian as `0xcffaedfe` — that branch reads `cputype` little-endian, and the byte-swapped magics read it big-endian. `ensureFsCli` resolves the runner target first (so an unsupported platform fails instead of reusing whatever is on `PATH`), then runs the same check (`binaryMismatchReason`) over the head of an fs-cli found on `PATH` and downloads a correct one when it does not match. The endpoint also returns `version`, which is logged.
+- **proxy.ts** — `useEnvProxy()` installs an undici `EnvHttpProxyAgent` as the global dispatcher when `HTTPS_PROXY`/`HTTP_PROXY` (either case) is set, so `fetch` honours it; `NO_PROXY` is handled by the agent. Node only reads those variables itself when started with `NODE_USE_ENV_PROXY`, which an action cannot set for its own process. Called from the `FsClient` constructor — the one point every request in this package passes through, including the fs-cli download, which takes a client. Idempotent, logs the proxy with credentials stripped, and warns instead of throwing on a malformed URL. `undici` is a direct dependency pinned to the major matching the actions' Node runtime (node24 -> undici 7); it adds ~1.25 MB to every committed bundle.
 - **gates.ts** — `evaluateGates()` — three modes: `delta`, `threshold`, `triage-priority`.
 - **report-parser.ts** — Parses CSV output from `fs-report` tool (triage and version-delta formats).
 - **formatting.ts** — Renders markdown for PR comments; edit-in-place works by embedding an HTML comment tag the action greps for on re-run.
@@ -56,15 +57,15 @@ cd actions/setup && pnpm build
 
 Seven GitHub Actions, each with `action.yml` + `src/main.ts` + `tsconfig.json` + `__tests__/` + committed `dist/`:
 
-| Action          | Purpose                                                                                           |
-| --------------- | ------------------------------------------------------------------------------------------------- |
-| `setup`         | Auth bootstrap — installs fs-cli (also the token check), resolves project name to ID, exports env |
-| `scan`          | Run fs-cli dependency scan and upload results; works standalone via its own `api-token`           |
-| `upload`        | Upload firmware/SBOM/third-party files via fs-cli, optionally poll scan status via fs-cli         |
-| `run-report`    | Install & execute `fs-report` CLI (via pipx), parse output, upload artifacts                      |
-| `quality-gate`  | Evaluate findings against gate config, output pass/fail                                           |
-| `pr-comment`    | Post/update PR comment with findings summary and gate results                                     |
-| `download-sbom` | Export CycloneDX/SPDX SBOM, upload as artifact                                                    |
+| Action          | Purpose                                                                                                                                                        |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `setup`         | Auth bootstrap — installs fs-cli (also the token check), resolves project name to ID, exports env                                                              |
+| `scan`          | Run fs-cli dependency scan and upload results; works standalone via its own `api-token`, and exports the setup context (no version ID — it only has the label) |
+| `upload`        | Upload firmware/SBOM/third-party files via fs-cli, optionally poll scan status via fs-cli; exports the setup context including the version ID                  |
+| `run-report`    | Install & execute `fs-report` CLI (via pipx), parse output, upload artifacts                                                                                   |
+| `quality-gate`  | Evaluate findings against gate config, output pass/fail                                                                                                        |
+| `pr-comment`    | Post/update PR comment with findings summary and gate results                                                                                                  |
+| `download-sbom` | Export CycloneDX/SPDX SBOM, upload as artifact; takes `api-token`/`domain` when no setup ran                                                                   |
 
 Plus `actions/upload-scan/` — a deprecated alias for `upload`, kept for consumers pinned to the old path. It is `action.yml` only: a composite that warns and forwards to `.../actions/upload@v2`. No `package.json`, so pnpm's `actions/*` glob skips it and it needs no bundle. Remove it in v3.
 

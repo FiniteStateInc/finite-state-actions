@@ -24,6 +24,7 @@ const mockEnsureFsCli = vi.fn()
 
 vi.mock('@finite-state/core', () => ({
   readSetupContext: vi.fn(),
+  writeSetupContext: vi.fn(),
   FsClient: vi.fn().mockImplementation(() => ({})),
   ensureFsCli: (...args: unknown[]) => mockEnsureFsCli(...args),
 }))
@@ -31,7 +32,7 @@ vi.mock('@finite-state/core', () => ({
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
 
 import * as core from '@actions/core'
-import { readSetupContext } from '@finite-state/core'
+import { readSetupContext, writeSetupContext } from '@finite-state/core'
 import { run } from '../src/main'
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -267,5 +268,32 @@ describe('scan action', () => {
     )
     expect(args).not.toContain('--project-id')
     expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('exports the context so later steps inherit auth without setup', async () => {
+    await run()
+
+    expect(writeSetupContext).toHaveBeenCalledWith({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      projectId: 'proj-123',
+      projectName: 'my-project',
+    })
+    expect(core.setOutput).toHaveBeenCalledWith('project-id', 'proj-123')
+  })
+
+  it('never exports the version label as a version ID', async () => {
+    await run()
+
+    expect(vi.mocked(writeSetupContext).mock.calls[0][0].versionId).toBeUndefined()
+  })
+
+  it('exports the context before fs-cli runs, so an always() step still has it', async () => {
+    mockExec.mockRejectedValueOnce(new Error('fs-cli blew up'))
+
+    await run()
+
+    expect(writeSetupContext).toHaveBeenCalled()
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('fs-cli blew up'))
   })
 })

@@ -1,3 +1,4 @@
+import { useEnvProxy } from './proxy'
 import type {
   AuthUser,
   CreateProjectOptions,
@@ -46,6 +47,11 @@ export class FsClient {
   private readonly headers: Record<string, string>
 
   constructor(config: FsClientConfig) {
+    // Every request this package makes goes through a client or is started
+    // right after one is built (the fs-cli download), so this is the one place
+    // a runner's proxy has to be picked up.
+    useEnvProxy()
+
     this.baseUrl = `https://${config.domain}/api/public/v0`
     this.headers = {
       'X-Authorization': config.apiToken,

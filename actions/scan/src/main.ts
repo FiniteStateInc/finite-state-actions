@@ -1,6 +1,6 @@
 import * as core from '@actions/core'
 import * as exec from '@actions/exec'
-import { FsClient, ensureFsCli, readSetupContext } from '@finite-state/core'
+import { FsClient, ensureFsCli, readSetupContext, writeSetupContext } from '@finite-state/core'
 
 export async function run(): Promise<void> {
   try {
@@ -32,6 +32,23 @@ export async function run(): Promise<void> {
       throw new Error(
         'name is required. Set it via the name input or ensure GITHUB_REPOSITORY is available.',
       )
+    }
+
+    // ── Export the context for later steps ───────────────────────────────────
+    // Written before the scan runs so a step with `if: always()` still has it.
+    // No version ID: fs-cli takes a version *label*, and the platform's ID for
+    // that version is not something this action learns — writing the label
+    // under FINITE_STATE_VERSION_ID would send downstream actions after a
+    // version that does not exist.
+    writeSetupContext({
+      apiToken: ctx.apiToken,
+      domain: ctx.domain,
+      projectId: ctx.projectId,
+      projectName: name,
+    })
+
+    if (ctx.projectId) {
+      core.setOutput('project-id', ctx.projectId)
     }
 
     // ── Build fs-cli args ────────────────────────────────────────────────────

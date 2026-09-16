@@ -1,4 +1,5 @@
 export * from './models'
+export * from './proxy'
 export * from './client'
 export * from './install-cli'
 export * from './context'

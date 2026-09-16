@@ -7,6 +7,7 @@ vi.mock('@actions/core', () => ({
   getBooleanInput: vi.fn(),
   setOutput: vi.fn(),
   setFailed: vi.fn(),
+  setSecret: vi.fn(),
   info: vi.fn(),
 }))
 
@@ -121,5 +122,45 @@ describe('download-sbom action', () => {
 
     expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('version-id'))
     expect(mockDownloadSbom).not.toHaveBeenCalled()
+  })
+
+  it('passes its own api-token and domain to readSetupContext', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        'api-token': 'input-token',
+        domain: 'acme.finitestate.io',
+        'version-id': 'ver-789',
+        format: 'cyclonedx',
+        'output-file': 'sbom.json',
+        'artifact-name': 'finite-state-sbom',
+      }
+      return inputs[name] ?? ''
+    })
+    vi.mocked(readSetupContext).mockReturnValue({
+      apiToken: 'input-token',
+      domain: 'acme.finitestate.io',
+      versionId: 'ver-789',
+    })
+
+    await run()
+
+    expect(readSetupContext).toHaveBeenCalledWith({
+      apiToken: 'input-token',
+      domain: 'acme.finitestate.io',
+      versionId: 'ver-789',
+    })
+    expect(core.setSecret).toHaveBeenCalledWith('input-token')
+    expect(mockDownloadSbom).toHaveBeenCalledWith('ver-789', 'cyclonedx', true)
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('leaves token and domain undefined when no input is given', async () => {
+    await run()
+
+    expect(readSetupContext).toHaveBeenCalledWith({
+      apiToken: undefined,
+      domain: undefined,
+      versionId: undefined,
+    })
   })
 })

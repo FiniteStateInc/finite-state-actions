@@ -60,12 +60,13 @@ vi.mock('@finite-state/core', () => ({
   FsClient: vi.fn().mockImplementation(() => ({})),
   ensureFsCli: (...args: unknown[]) => mockEnsureFsCli(...args),
   readSetupContext: vi.fn(),
+  writeSetupContext: vi.fn(),
 }))
 
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
 
 import * as core from '@actions/core'
-import { readSetupContext } from '@finite-state/core'
+import { readSetupContext, writeSetupContext } from '@finite-state/core'
 import { run } from '../src/main'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -157,7 +158,9 @@ describe('upload action', () => {
 
     // version ID comes from fs-cli stdout, not an API call
     expect(core.setOutput).toHaveBeenCalledWith('version-id', 'ver-999')
-    expect(core.exportVariable).toHaveBeenCalledWith('FINITE_STATE_VERSION_ID', 'ver-999')
+    expect(writeSetupContext).toHaveBeenLastCalledWith(
+      expect.objectContaining({ versionId: 'ver-999' }),
+    )
     expect(core.setOutput).toHaveBeenCalledWith('scan-status', 'SUBMITTED')
     expect(core.setFailed).not.toHaveBeenCalled()
   })
@@ -653,5 +656,43 @@ describe('upload action', () => {
     await run()
 
     expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('No file matches'))
+  })
+
+  it('persists auth for later steps before fs-cli runs', async () => {
+    runQueue.push({ exitCode: 1, stdout: '' })
+
+    await run()
+
+    expect(writeSetupContext).toHaveBeenCalledWith({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      projectId: '42',
+      projectName: undefined,
+      versionId: undefined,
+    })
+    expect(core.setFailed).toHaveBeenCalled()
+  })
+
+  it('persists the project fs-cli reported when none was known up front', async () => {
+    setInputs({ type: 'sca', file: '/tmp/results.json', version: 'v1.2.3' })
+    vi.mocked(readSetupContext).mockReturnValue({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      projectId: undefined,
+      projectName: 'my-project',
+      versionId: undefined,
+    })
+    runQueue.push({ exitCode: 0, stdout: UPLOAD_LINE })
+
+    await run()
+
+    expect(core.setOutput).toHaveBeenCalledWith('project-id', 'proj-1')
+    expect(writeSetupContext).toHaveBeenLastCalledWith({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      projectId: 'proj-1',
+      projectName: 'my-project',
+      versionId: 'ver-999',
+    })
   })
 })

@@ -14,9 +14,20 @@ export async function run(): Promise<void> {
     const outputFile = core.getInput('output-file') || 'sbom.json'
     const uploadArtifact = core.getBooleanInput('upload-artifact')
     const artifactName = core.getInput('artifact-name') || 'finite-state-sbom'
+    const apiTokenInput = core.getInput('api-token') || undefined
+    const domainInput = core.getInput('domain') || undefined
 
-    // ── Read setup context with version-id override ──────────────────────────
-    const ctx = readSetupContext({ versionId: versionIdInput })
+    // ── Read setup context, falling back to this action's own inputs ─────────
+    // Running without the setup action is supported: pass api-token here, the
+    // same way scan and upload accept it.
+    const ctx = readSetupContext({
+      apiToken: apiTokenInput,
+      domain: domainInput,
+      versionId: versionIdInput,
+    })
+
+    // Mask the token when it came from this action's input rather than setup.
+    core.setSecret(ctx.apiToken)
 
     // ── Validate version ID ──────────────────────────────────────────────────
     if (!ctx.versionId) {

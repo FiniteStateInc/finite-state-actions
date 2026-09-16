@@ -33,6 +33,8 @@ inputs:
 outputs:
   exit-code:
     description: 'Exit code from fs-cli scan'
+  project-id:
+    description: 'Project ID this scan used. Only set when one was given via setup or the project-id input — scan does not learn the ID of a project the platform creates.'
 runs:
   using: 'node24'
   main: 'dist/index.js'

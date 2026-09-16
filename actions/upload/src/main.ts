@@ -1,7 +1,7 @@
 import * as core from '@actions/core'
 import * as exec from '@actions/exec'
 import { glob } from 'fs/promises'
-import { FsClient, ensureFsCli, readSetupContext } from '@finite-state/core'
+import { FsClient, ensureFsCli, readSetupContext, writeSetupContext } from '@finite-state/core'
 import type { SbomFormat } from '@finite-state/core'
 
 // ── Scan-type routing ─────────────────────────────────────────────────────────
@@ -344,6 +344,18 @@ export async function run(): Promise<void> {
       )
     }
 
+    // ── Export what is known for later steps ────────────────────────────────
+    // Written before the upload runs so a step with `if: always()` inherits the
+    // auth context. The version ID is written again below, once fs-cli reports
+    // the one it actually used.
+    writeSetupContext({
+      apiToken: ctx.apiToken,
+      domain: ctx.domain,
+      projectId: ctx.projectId,
+      projectName,
+      versionId: versionIdInput,
+    })
+
     // ── Build the project/version locator ────────────────────────────────────
     // fs-cli find-or-creates the project and version itself, so this action
     // makes no API calls of its own beyond fetching the CLI. --name is passed
@@ -396,7 +408,8 @@ export async function run(): Promise<void> {
       throw new Error(`fs-cli ${args[0]} exited with code ${upload.exitCode}`)
     }
 
-    const projectVersionId = versionIdInput || parseUploadIds(upload.stdout).versionId
+    const uploadedIds = parseUploadIds(upload.stdout)
+    const projectVersionId = versionIdInput || uploadedIds.versionId
     if (!projectVersionId) {
       throw new Error(
         `Could not read the version ID from fs-cli ${args[0]} output. ` +
@@ -404,8 +417,23 @@ export async function run(): Promise<void> {
       )
     }
 
+    const projectId = ctx.projectId || uploadedIds.projectId
+
     core.setOutput('version-id', projectVersionId)
-    core.exportVariable('FINITE_STATE_VERSION_ID', projectVersionId)
+    if (projectId) {
+      core.setOutput('project-id', projectId)
+    }
+
+    // Re-export with the IDs fs-cli reported — including a project the platform
+    // created for this upload, which is the one case the project ID could not
+    // be known beforehand.
+    writeSetupContext({
+      apiToken: ctx.apiToken,
+      domain: ctx.domain,
+      projectId,
+      projectName,
+      versionId: projectVersionId,
+    })
 
     if (!waitForCompletion) {
       core.setOutput('scan-status', 'SUBMITTED')
