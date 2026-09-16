@@ -160,6 +160,8 @@ jobs:
         with:
           version: pr-${{ github.event.number }}
 
+      - uses: FiniteStateInc/finite-state-actions/actions/wait@v2
+
       - uses: FiniteStateInc/finite-state-actions/actions/run-report@v2
         id: report
         with:
@@ -230,6 +232,9 @@ get whatever the platform has finished so far — usually an SBOM with no findin
 VEX data. Wait for the scan to settle first.
 
 After `upload`, set `wait-for-completion: true` (as above) and the action polls for you.
+That changes what the step costs: it now blocks for as long as the scan takes — up to
+fs-cli's 30-minute default — and fails on a scan that fails or outruns the timeout, where
+before it returned in seconds and reported `SUBMITTED`.
 
 After `scan`, which has no such input, add the `wait` action. It needs no inputs — `scan`
 puts `fs-cli` on `PATH` and exports the token, domain and version ID:
@@ -261,9 +266,20 @@ so a later step never reads partial results from a green job.
 | `version-id` | no       | `FINITE_STATE_VERSION_ID`    | The version to wait on                                                      |
 | `timeout`    | no       | fs-cli's own 30 minutes      | Maximum wait in whole seconds, rounded up to the whole minutes fs-cli takes |
 
-`wait` does not install `fs-cli` — run `setup`, `scan` or `upload` earlier in the same job,
-each of which adds it to `PATH`. It also waits on one version at a time, the one in
-`FINITE_STATE_VERSION_ID` unless you pass `version-id`.
+Four things to know:
+
+- **It does not install `fs-cli`.** Run `setup`, `scan` or `upload` earlier in the same job,
+  each of which adds it to `PATH`. Without one, `wait` fails rather than installing anything.
+- **`FINITE_STATE_VERSION_ID` comes from `scan` or `upload`.** `setup` exports it only when
+  you passed it `version-id`, so `setup` → `wait` on its own has no version to wait on.
+- **It waits on one version.** Two uploads to different versions in the same job need a
+  `wait` each, with `version-id` set — the environment variable only holds the most recent.
+- **`timeout` bounds this step only.** `upload`'s `timeout` covers its own upload and, with
+  `wait-for-completion`, its own poll; it does not carry over to a separate `wait` step.
+
+`wait` asks the platform for the version's scans, so the step that created the version has
+to have run first. Straight after `scan` or `upload` that holds — both return only once the
+platform has accepted the files and reported back the version ID that `wait` then uses.
 
 ## Reports
 
@@ -315,6 +331,10 @@ setup (validates auth, exports env vars, installs fs-cli)
   +---> scan (runs fs-cli scan, uploads results to platform)
   |
   +---> upload (runs fs-cli upload/import/third-party for a built artifact)
+  |
+  +---> wait (blocks until the platform finishes scanning the version)
+  |       needed before anything below reads results — unless upload ran
+  |       with wait-for-completion: true, which does the same waiting
   |
   +---> run-report (generates findings reports)
   |       |

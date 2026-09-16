@@ -11,11 +11,29 @@
 #   FINITE_STATE_AUTH_TOKEN, FINITE_STATE_DOMAIN, FINITE_STATE_VERSION_ID
 set -euo pipefail
 
+# Trims surrounding whitespace, which a YAML block scalar or an env var read
+# from a file routinely carries. The TS actions get this from `getInput`, which
+# trims on its own.
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
 # Inputs win over the context setup/scan/upload exported.
-TOKEN="${INPUT_API_TOKEN:-${FINITE_STATE_AUTH_TOKEN:-}}"
-DOMAIN="${INPUT_DOMAIN:-${FINITE_STATE_DOMAIN:-app.finitestate.io}}"
-VERSION_ID="${INPUT_VERSION_ID:-${FINITE_STATE_VERSION_ID:-}}"
-TIMEOUT="${INPUT_TIMEOUT:-}"
+TOKEN="$(trim "${INPUT_API_TOKEN:-${FINITE_STATE_AUTH_TOKEN:-}}")"
+DOMAIN="$(trim "${INPUT_DOMAIN:-${FINITE_STATE_DOMAIN:-app.finitestate.io}}")"
+VERSION_ID="$(trim "${INPUT_VERSION_ID:-${FINITE_STATE_VERSION_ID:-}}")"
+TIMEOUT="$(trim "${INPUT_TIMEOUT:-}")"
+
+# Masks the token in the log the way core.setSecret does in the TS actions. A
+# token from `secrets.` is masked already; one composed from a `vars.` value or
+# a literal is not, and would otherwise reach the log through a bash trace or
+# fs-cli's own output.
+if [ -n "$TOKEN" ]; then
+  echo "::add-mask::$TOKEN"
+fi
 
 if [ -z "$TOKEN" ]; then
   echo "::error title=No API token::Run setup, scan or upload first, or pass api-token."
@@ -43,13 +61,17 @@ if [ -n "$TIMEOUT" ]; then
       exit 1
       ;;
   esac
-  if [ "$TIMEOUT" -le 0 ]; then
+  # Forces base 10 before any arithmetic: bash reads a leading zero as octal, so
+  # "0600" would arrive as 384 seconds and "09" would abort the script with
+  # "value too great for base" and no ::error:: annotation to explain it.
+  SECONDS_WAIT=$((10#$TIMEOUT))
+  if [ "$SECONDS_WAIT" -le 0 ]; then
     echo "::error title=Bad timeout::timeout must be a positive number of seconds, got \"$TIMEOUT\"."
     exit 1
   fi
-  MINUTES=$(((TIMEOUT + 59) / 60))
-  if [ $((TIMEOUT % 60)) -ne 0 ]; then
-    echo "::warning title=Timeout rounded::timeout ${TIMEOUT}s is not a whole number of minutes, which is all fs-cli accepts; rounding up to ${MINUTES} minute(s)."
+  MINUTES=$(((SECONDS_WAIT + 59) / 60))
+  if [ $((SECONDS_WAIT % 60)) -ne 0 ]; then
+    echo "::warning title=Timeout rounded::timeout ${SECONDS_WAIT}s is not a whole number of minutes, which is all fs-cli accepts; rounding up to ${MINUTES} minute(s)."
   fi
   POLL_TIMEOUT=(--poll-timeout "$MINUTES")
 fi
@@ -63,6 +85,13 @@ echo "Waiting for scans on version $VERSION_ID to finish."
 #
 # The ${arr[@]+...} guard is there because `set -u` makes an empty array
 # expansion an error in bash 3.2, which is what macOS runners ship.
+# fs-cli's exit code is the verdict. Under --fail-on-scan-incomplete a zero exit
+# means every scan for the version settled successfully, which is the same thing
+# upload's TS path treats as authoritative; upload additionally reads the JSON
+# rollup only because it publishes a scan-status output that must not contradict
+# the exit code. This action has no such output, and parsing JSON here would
+# mean depending on jq, which a runner is not guaranteed to have.
+set +e
 FS_TOKEN="$TOKEN" fs-cli query \
   --type scan \
   --format json \
@@ -71,3 +100,14 @@ FS_TOKEN="$TOKEN" fs-cli query \
   --wait \
   ${POLL_TIMEOUT[@]+"${POLL_TIMEOUT[@]}"} \
   --fail-on-scan-incomplete
+QUERY_EXIT=$?
+set -e
+
+if [ "$QUERY_EXIT" -ne 0 ]; then
+  # fs-cli has already printed why; this adds the annotation and the context a
+  # bare non-zero exit does not carry.
+  echo "::error title=Scan did not finish::fs-cli query exited ${QUERY_EXIT} for version ${VERSION_ID} on ${DOMAIN}. The scan failed, ran past the poll timeout, or the version has no scans. See the fs-cli output above."
+  exit "$QUERY_EXIT"
+fi
+
+echo "Scans on version $VERSION_ID finished."

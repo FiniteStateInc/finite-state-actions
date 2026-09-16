@@ -509,7 +509,7 @@ Blocks until the platform finishes scanning a version, so a later step never rea
 | ------------ | -------- | ------------------------- | -------------------------------------------------------------------------------------- |
 | `api-token`  | no       | from setup/scan/upload    | FS API token. Only needed when none of those ran in this job                           |
 | `domain`     | no       | from setup                | Platform domain. Falls back to the setup context, then `app.finitestate.io`            |
-| `version-id` | no       | `FINITE_STATE_VERSION_ID` | Version to wait on. `setup`, `scan` and `upload` all export one                        |
+| `version-id` | no       | `FINITE_STATE_VERSION_ID` | Version to wait on. `scan` and `upload` export one; `setup` only if given `version-id` |
 | `timeout`    | no       | fs-cli's 30 minutes       | Maximum wait in whole seconds, rounded up to whole minutes — all fs-cli's flag accepts |
 
 **Outputs:** none. The step passes or fails; there is no partial-success status to report.
@@ -537,6 +537,10 @@ Blocks until the platform finishes scanning a version, so a later step never rea
 - **`version-id` is a platform version ID, not a label.** It defaults to `FINITE_STATE_VERSION_ID`, which `scan` and `upload` export after reading it back from fs-cli. When `scan` could not parse an ID it warns, and `wait` then fails with `No version ID`.
 - **Redundant after `upload` with `wait-for-completion: true`.** That input runs the same query inside the upload step. Use one or the other, not both.
 - **It waits on one version.** Two uploads to different versions in the same job need a `wait` step each, with `version-id` set explicitly — the env var only holds the most recent.
+- **`setup` alone does not satisfy it.** `setup` exports `FINITE_STATE_VERSION_ID` only when you passed it a `version-id`, so `setup` → `wait` fails with `No version ID` unless a `scan` or `upload` ran between them or you pass `version-id` yourself.
+- **`timeout` is per step.** `upload`'s `timeout` bounds its own upload and its own poll under `wait-for-completion`; it does not carry into a separate `wait` step, which falls back to fs-cli's 30-minute default unless given its own `timeout`.
+- **It reports pass/fail, not status.** `upload` publishes `scan-status` because it parses the query JSON; `wait` takes fs-cli's exit code as the verdict — under `--fail-on-scan-incomplete` a zero exit means every scan settled — and reads no JSON, so there is no status output to consume. Use `upload` with `wait-for-completion: true` when a downstream step needs the status string.
+- **It reuses whatever fs-cli is on `PATH`.** `ensureFsCli` in the TS actions sniffs the executable header and re-downloads a foreign binary; `wait` does not repeat that check, so it trusts the fs-cli that the earlier `setup`/`scan`/`upload` step validated and installed.
 
 ---
 
@@ -609,6 +613,7 @@ setup (validates auth, exports env vars, installs fs-cli)   [optional if only sc
   |
   +---> wait (blocks until the platform finishes scanning the version)
   |       |-- reads: FINITE_STATE_AUTH_TOKEN, FINITE_STATE_DOMAIN, FINITE_STATE_VERSION_ID
+  |       |-- requires: fs-cli already on PATH from setup, scan or upload
   |       |-- outputs: none; fails the step on a failed or unfinished scan
   |
   v
