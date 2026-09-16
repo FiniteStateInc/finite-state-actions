@@ -57,15 +57,15 @@ cd actions/setup && pnpm build
 
 Seven GitHub Actions, each with `action.yml` + `src/main.ts` + `tsconfig.json` + `__tests__/` + committed `dist/`:
 
-| Action          | Purpose                                                                                                                                                        |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `setup`         | Auth bootstrap — installs fs-cli (also the token check), resolves project name to ID, exports env                                                              |
-| `scan`          | Run fs-cli dependency scan and upload results; works standalone via its own `api-token`, and exports the setup context (no version ID — it only has the label) |
-| `upload`        | Upload firmware/SBOM/third-party files via fs-cli, optionally poll scan status via fs-cli; exports the setup context including the version ID                  |
-| `run-report`    | Install & execute `fs-report` CLI (via pipx), parse output, upload artifacts                                                                                   |
-| `quality-gate`  | Evaluate findings against gate config, output pass/fail                                                                                                        |
-| `pr-comment`    | Post/update PR comment with findings summary and gate results                                                                                                  |
-| `download-sbom` | Export CycloneDX/SPDX SBOM, upload as artifact; takes `api-token`/`domain` when no setup ran                                                                   |
+| Action          | Purpose                                                                                                                                                                          |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `setup`         | Auth bootstrap — installs fs-cli (also the token check), resolves project name to ID, exports env                                                                                |
+| `scan`          | Run fs-cli dependency scan and upload results; works standalone via its own `api-token`, and exports the setup context, with project/version IDs parsed from fs-cli's log output |
+| `upload`        | Upload firmware/SBOM/third-party files via fs-cli, optionally poll scan status via fs-cli; exports the setup context including the version ID                                    |
+| `run-report`    | Install & execute `fs-report` CLI (via pipx), parse output, upload artifacts                                                                                                     |
+| `quality-gate`  | Evaluate findings against gate config, output pass/fail                                                                                                                          |
+| `pr-comment`    | Post/update PR comment with findings summary and gate results                                                                                                                    |
+| `download-sbom` | Export CycloneDX/SPDX SBOM, upload as artifact; takes `api-token`/`domain` when no setup ran                                                                                     |
 
 Plus `actions/upload-scan/` — a deprecated alias for `upload`, kept for consumers pinned to the old path. It is `action.yml` only: a composite that warns and forwards to `.../actions/upload@v2`. No `package.json`, so pnpm's `actions/*` glob skips it and it needs no bundle. Remove it in v3.
 

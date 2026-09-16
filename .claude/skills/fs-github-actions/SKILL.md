@@ -98,10 +98,11 @@ Runs `fs-cli scan` to analyze project dependencies and upload results to the Fin
 
 **Outputs:**
 
-| Output       | Description                                                                               |
-| ------------ | ----------------------------------------------------------------------------------------- |
-| `exit-code`  | Exit code from fs-cli                                                                     |
-| `project-id` | Project ID used, when one was known. Empty when the platform created the project instead. |
+| Output       | Description                                                                   |
+| ------------ | ----------------------------------------------------------------------------- |
+| `exit-code`  | Exit code from fs-cli                                                         |
+| `project-id` | Project ID used: from the `project-id` input, from setup, or read from fs-cli |
+| `version-id` | Version ID the platform resolved for the version label, read from fs-cli      |
 
 **Behavior:** Reads auth context from the `setup` action's exported environment variables, then exports it again for later steps. Always passes `--name` to `fs-cli` (required); adds `--project-id` when available. The `name` input defaults to the repository name extracted from `GITHUB_REPOSITORY`.
 
@@ -113,7 +114,8 @@ Runs `fs-cli scan` to analyze project dependencies and upload results to the Fin
 - **`project-id` is forwarded verbatim to `fs-cli --project-id`.** Platform project IDs are signed 64-bit integers (e.g. `-4065045466680884751`), not UUIDs. To target a project by name, use `project-name` on `scan` or `setup` rather than putting a name here.
 - **Invocation order is `fs-cli scan --endpoint … --token … --name … --version …`, then `--project-id` and any `extra-args`, with the scan target path last.**
 - **`extra-args` is split on whitespace.** There is no shell-style quoting, so an argument containing a space becomes two arguments. Pass such values through a dedicated input or a config file instead.
-- **`scan` exports the auth context, so later steps do not need it again.** It writes `FINITE_STATE_AUTH_TOKEN`, `FINITE_STATE_DOMAIN`, `FINITE_STATE_PROJECT_NAME` and (when known) `FINITE_STATE_PROJECT_ID` before fs-cli runs, so even an `if: always()` step inherits them. It does **not** write `FINITE_STATE_VERSION_ID` — fs-cli takes a version label, and the platform's ID for that version is not something `scan` learns.
+- **`scan` exports the auth context, so later steps do not need it again.** It writes `FINITE_STATE_AUTH_TOKEN`, `FINITE_STATE_DOMAIN`, `FINITE_STATE_PROJECT_NAME` and (when known) `FINITE_STATE_PROJECT_ID` before fs-cli runs, so even an `if: always()` step inherits them.
+- **The project and version IDs come from fs-cli's log output.** `scan` sends a version _label_; the platform decides which version that maps to and fs-cli reports it as `msg="using version" … id=…` and `submissionID=platform:<projectId>:<versionId>`. `scan` captures stdout **and stderr** (fs-cli logs to stderr), parses those, then exports `FINITE_STATE_PROJECT_ID`/`FINITE_STATE_VERSION_ID` and sets the matching outputs. No ID in the output means a warning, not a failure.
 - **The step fails on any non-zero `fs-cli` exit, but `exit-code` is still set.** Use `continue-on-error: true` plus `steps.<id>.outputs.exit-code` when you want to inspect the code rather than fail the job.
 
 **Example:**
@@ -537,7 +539,7 @@ Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
 **Gotchas:**
 
 - **`version-id` is a platform version ID, not a version label.** `v1.2.3` will not work; the ID is what `upload` returns as its `version-id` output.
-- **A `scan`-only workflow has no version ID to pass.** `scan` exports auth but not a version ID, so either use `upload`, set `version-id` on `setup`, or look the ID up against the API in a `run:` step.
+- **A `scan`-only workflow gets its version ID from `scan`.** `scan` reads the ID back from fs-cli's output and exports it, so `download-sbom` needs no `version-id` input after a `scan` in the same job. When fs-cli prints no ID (an interrupted scan, an older fs-cli), `scan` warns and you have to pass `version-id` yourself.
 
 ---
 
@@ -554,8 +556,8 @@ setup (validates auth, exports env vars, installs fs-cli)   [optional if only sc
   |-- outputs: project-id, version-id
   |
   +---> scan (runs fs-cli dependency scan, uploads results)
-  |       |-- exports: the same env vars, minus FINITE_STATE_VERSION_ID
-  |       |-- outputs: exit-code, project-id
+  |       |-- exports: the same env vars, IDs read back from fs-cli output
+  |       |-- outputs: exit-code, project-id, version-id
   |
   +---> upload (uploads binary/SBOM/third-party results)
   |       |-- exports: the same env vars, plus FINITE_STATE_VERSION_ID
@@ -583,9 +585,9 @@ download-sbom (reads env + setup/upload outputs)
 2. **upload before run-report** -- the scan must complete before reports can analyze it.
 3. **run-report before quality-gate and pr-comment** -- both consume report outputs.
 4. **quality-gate before pr-comment** (optional) -- if you want gate results in the PR comment, run the gate first.
-5. **download-sbom needs a version ID** -- the platform's version UUID, not a version label like `v1.2.3`. `upload` is the only action that outputs one. Pass `version-id` to `setup` or to `download-sbom` if no `upload` step runs; a `scan`-only workflow has to look the ID up itself.
+5. **download-sbom needs a version ID** -- the platform's version ID, not a version label like `v1.2.3`. `scan` and `upload` both output one and export it as `FINITE_STATE_VERSION_ID`, so a `scan` or `upload` earlier in the job covers it. Otherwise pass `version-id` to `setup` or to `download-sbom`.
 6. **`scan`, `upload` and `download-sbom` run without setup** -- all three accept `api-token`/`domain` directly (`scan` and `upload` also take `project-name`), and `scan`/`upload` download fs-cli when PATH has none. The other actions read auth from the env vars `setup` exports, though all of them accept explicit project/version inputs instead of upstream outputs.
-7. **`scan` and `upload` export the auth context too** -- both write the same `FINITE_STATE_*` env vars `setup` does, so a later step inherits the token, domain and project without repeating them. `upload` also writes `FINITE_STATE_VERSION_ID`, and the project ID fs-cli reported when the platform created the project. `scan` writes no version ID, since fs-cli only ever sees the version label. No other action exports anything.
+7. **`scan` and `upload` export the full context too** -- both write the same `FINITE_STATE_*` env vars `setup` does, including `FINITE_STATE_PROJECT_ID` and `FINITE_STATE_VERSION_ID`, so a later step inherits everything without repeating it. Both read those two IDs back from fs-cli's own output, which is the only place the platform reports them. No other action exports anything.
 
 ### Referencing upstream outputs
 
@@ -795,6 +797,23 @@ jobs:
           format: cyclonedx
           include-vex: true
           artifact-name: 'sbom-${{ github.ref_name }}'
+```
+
+A source scan works the same way, with no `version-id` anywhere — `scan` exports the ID it read back from fs-cli:
+
+```yaml
+- uses: FiniteStateInc/finite-state-actions/actions/scan@v2
+  with:
+    api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
+    domain: ${{ vars.FINITE_STATE_DOMAIN }}
+    project-name: ${{ github.event.repository.name }}
+    version: ${{ github.ref_name }}
+
+- uses: FiniteStateInc/finite-state-actions/actions/download-sbom@v2
+  with:
+    format: cyclonedx
+    include-vex: true
+    artifact-name: 'sbom-${{ github.ref_name }}'
 ```
 
 **Key points:**

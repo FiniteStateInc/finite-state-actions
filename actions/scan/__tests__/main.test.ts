@@ -8,6 +8,7 @@ vi.mock('@actions/core', () => ({
   setFailed: vi.fn(),
   setSecret: vi.fn(),
   info: vi.fn(),
+  warning: vi.fn(),
 }))
 
 // ── Mock @actions/exec ─────────────────────────────────────────────────────────
@@ -33,7 +34,19 @@ vi.mock('@finite-state/core', () => ({
 
 import * as core from '@actions/core'
 import { readSetupContext, writeSetupContext } from '@finite-state/core'
-import { run } from '../src/main'
+import { parseScanIds, run } from '../src/main'
+
+// ── Fixtures ───────────────────────────────────────────────────────────────────
+
+type ExecOptions = { listeners?: { stdout?: (d: Buffer) => void; stderr?: (d: Buffer) => void } }
+
+/** Real fs-cli v2.3.33 output, trimmed to the lines carrying IDs. */
+const FS_CLI_LOG = [
+  'time=2026-09-16T19:27:22.415Z level=INFO msg="fs-cli starting" version=v2.3.33 command=scan',
+  'time=2026-09-16T19:27:48.994Z level=INFO msg="using project" name=WebGoat id=9b590756-b726-4aaf-9dab-336f315789a2',
+  'time=2026-09-16T19:27:49.784Z level=INFO msg="using version" version=main..453727d3 id=a097b616-c9b4-4f22-a924-798899c6ccae',
+  'time=2026-09-16T19:27:58.380Z level=INFO msg="scan complete" project=WebGoat version=main..453727d3 submissionID=platform:9b590756-b726-4aaf-9dab-336f315789a2:a097b616-c9b4-4f22-a924-798899c6ccae',
+].join('\n')
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
@@ -82,7 +95,7 @@ describe('scan action', () => {
         'proj-123',
         '.',
       ],
-      { ignoreReturnCode: true },
+      expect.objectContaining({ ignoreReturnCode: true }),
     )
 
     expect(core.setOutput).toHaveBeenCalledWith('exit-code', '0')
@@ -144,12 +157,12 @@ describe('scan action', () => {
     expect(mockExec).toHaveBeenCalledWith(
       '/usr/local/bin/fs-cli',
       expect.arrayContaining(['--name', 'my-firmware']),
-      { ignoreReturnCode: true },
+      expect.objectContaining({ ignoreReturnCode: true }),
     )
     expect(mockExec).toHaveBeenCalledWith(
       '/usr/local/bin/fs-cli',
       expect.not.arrayContaining(['--project-id']),
-      { ignoreReturnCode: true },
+      expect.objectContaining({ ignoreReturnCode: true }),
     )
 
     delete process.env.GITHUB_REPOSITORY
@@ -295,5 +308,96 @@ describe('scan action', () => {
 
     expect(writeSetupContext).toHaveBeenCalled()
     expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('fs-cli blew up'))
+  })
+
+  it('publishes the project and version IDs fs-cli resolved', async () => {
+    vi.mocked(readSetupContext).mockReturnValue({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      projectId: undefined,
+      versionId: undefined,
+    })
+    mockExec.mockImplementation(async (_bin: string, _args: string[], options: ExecOptions) => {
+      options.listeners?.stderr?.(Buffer.from(FS_CLI_LOG))
+      return 0
+    })
+
+    await run()
+
+    expect(core.setOutput).toHaveBeenCalledWith(
+      'version-id',
+      'a097b616-c9b4-4f22-a924-798899c6ccae',
+    )
+    expect(core.setOutput).toHaveBeenCalledWith(
+      'project-id',
+      '9b590756-b726-4aaf-9dab-336f315789a2',
+    )
+    expect(writeSetupContext).toHaveBeenLastCalledWith({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      projectId: '9b590756-b726-4aaf-9dab-336f315789a2',
+      projectName: 'my-project',
+      versionId: 'a097b616-c9b4-4f22-a924-798899c6ccae',
+    })
+    expect(core.warning).not.toHaveBeenCalled()
+  })
+
+  it('warns instead of failing when fs-cli output carries no version ID', async () => {
+    mockExec.mockImplementation(async (_bin: string, _args: string[], options: ExecOptions) => {
+      options.listeners?.stdout?.(Buffer.from('nothing useful here\n'))
+      return 0
+    })
+
+    await run()
+
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('version ID'))
+    expect(core.setOutput).not.toHaveBeenCalledWith('version-id', expect.anything())
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('prefers an explicit project-id over the one fs-cli reports', async () => {
+    mockExec.mockImplementation(async (_bin: string, _args: string[], options: ExecOptions) => {
+      options.listeners?.stderr?.(Buffer.from(FS_CLI_LOG))
+      return 0
+    })
+
+    await run()
+
+    expect(core.setOutput).toHaveBeenCalledWith('project-id', 'proj-123')
+  })
+})
+
+describe('parseScanIds', () => {
+  it('reads both IDs from the submission ID', () => {
+    expect(parseScanIds(FS_CLI_LOG)).toEqual({
+      projectId: '9b590756-b726-4aaf-9dab-336f315789a2',
+      versionId: 'a097b616-c9b4-4f22-a924-798899c6ccae',
+    })
+  })
+
+  it('falls back to the using-project and using-version lines', () => {
+    const interrupted = FS_CLI_LOG.split('msg="scan complete"')[0]
+
+    expect(parseScanIds(interrupted)).toEqual({
+      projectId: '9b590756-b726-4aaf-9dab-336f315789a2',
+      versionId: 'a097b616-c9b4-4f22-a924-798899c6ccae',
+    })
+  })
+
+  it('does not mistake the project ID for the version ID', () => {
+    const projectOnly =
+      'time=2026-09-16T19:27:48.994Z level=INFO msg="using project" name=WebGoat id=9b590756-b726-4aaf-9dab-336f315789a2\n'
+
+    expect(parseScanIds(projectOnly)).toEqual({
+      projectId: '9b590756-b726-4aaf-9dab-336f315789a2',
+      versionId: undefined,
+    })
+  })
+
+  it('returns nothing for output with no IDs', () => {
+    expect(parseScanIds('fs-cli starting\n')).toEqual({
+      projectId: undefined,
+      versionId: undefined,
+    })
   })
 })

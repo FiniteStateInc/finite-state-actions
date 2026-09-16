@@ -2,6 +2,30 @@ import * as core from '@actions/core'
 import * as exec from '@actions/exec'
 import { FsClient, ensureFsCli, readSetupContext, writeSetupContext } from '@finite-state/core'
 
+/**
+ * Pulls the platform's project and version IDs out of fs-cli's log output.
+ *
+ * fs-cli reports them three times over a successful scan, so both a completed
+ * and an interrupted run have something to read:
+ *
+ *   msg="using project" name=WebGoat id=9b590756-...
+ *   msg="using version" version=v1.2.3 id=a097b616-...
+ *   msg="scan complete" ... submissionID=platform:9b590756-...:a097b616-...
+ *
+ * The submission ID carries both, so it is tried first.
+ */
+export function parseScanIds(output: string): { projectId?: string; versionId?: string } {
+  const submission = /submissionID=platform:([^:\s]+):(\S+)/.exec(output)
+  if (submission) {
+    return { projectId: submission[1], versionId: submission[2] }
+  }
+
+  return {
+    projectId: /msg="using project"[^\n]*?\bid=(\S+)/.exec(output)?.[1],
+    versionId: /msg="using version"[^\n]*?\bid=(\S+)/.exec(output)?.[1],
+  }
+}
+
 export async function run(): Promise<void> {
   try {
     // ── Read inputs ──────────────────────────────────────────────────────────
@@ -47,10 +71,6 @@ export async function run(): Promise<void> {
       projectName: name,
     })
 
-    if (ctx.projectId) {
-      core.setOutput('project-id', ctx.projectId)
-    }
-
     // ── Build fs-cli args ────────────────────────────────────────────────────
     // Flags first, scan target last — fs-cli expects the path as the final
     // positional argument.
@@ -84,11 +104,47 @@ export async function run(): Promise<void> {
 
     // ── Run fs-cli scan ──────────────────────────────────────────────────────
     core.info(`Scanning ${dir} for project ${ctx.projectId ?? name} version ${version}`)
+    // fs-cli logs to stderr, and the IDs this action needs are in those log
+    // lines — so both streams are captured. exec still echoes them to the
+    // step log.
+    let output = ''
+    const collect = (data: Buffer) => {
+      output += data.toString()
+    }
     const exitCode = await exec.exec(fsCli, args, {
       ignoreReturnCode: true,
+      listeners: { stdout: collect, stderr: collect },
     })
 
     core.setOutput('exit-code', String(exitCode))
+
+    // ── Publish the IDs fs-cli resolved ─────────────────────────────────────
+    // This is the only way scan learns them: it sends a version *label*, and
+    // the platform decides which project and version that maps to. Downstream
+    // actions such as download-sbom need the IDs, not the label.
+    const scanned = parseScanIds(output)
+    const resolvedProjectId = ctx.projectId || scanned.projectId
+
+    if (resolvedProjectId) {
+      core.setOutput('project-id', resolvedProjectId)
+    }
+
+    if (scanned.versionId) {
+      core.setOutput('version-id', scanned.versionId)
+    } else {
+      core.warning(
+        'Could not read the version ID from fs-cli output. Downstream actions that need one ' +
+          '(such as download-sbom) will have to be given version-id explicitly.',
+      )
+    }
+
+    writeSetupContext({
+      apiToken: ctx.apiToken,
+      domain: ctx.domain,
+      projectId: resolvedProjectId,
+      projectName: name,
+      versionId: scanned.versionId,
+    })
 
     if (exitCode !== 0) {
       core.setFailed(`fs-cli scan exited with code ${exitCode}`)
