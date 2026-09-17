@@ -1,6 +1,12 @@
 import * as core from '@actions/core'
 import * as exec from '@actions/exec'
-import { FsClient, ensureFsCli, parseTimeoutMinutes, readSetupContext } from '@finite-state/core'
+import {
+  FsClient,
+  ensureFsCli,
+  parseTimeoutMinutes,
+  quoteExecPath,
+  readSetupContext,
+} from '@finite-state/core'
 
 export async function run(): Promise<void> {
   try {
@@ -46,8 +52,9 @@ export async function run(): Promise<void> {
     // exit code; this action has no such output and so has nothing to parse.
     //
     // The token goes through FS_TOKEN so it stays out of the argument list.
+    // The path is quoted because exec splits its first parameter on spaces.
     const exitCode = await exec.exec(
-      fsCli,
+      quoteExecPath(fsCli),
       [
         'query',
         '--type',

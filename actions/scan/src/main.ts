@@ -1,6 +1,12 @@
 import * as core from '@actions/core'
 import * as exec from '@actions/exec'
-import { FsClient, ensureFsCli, readSetupContext, writeSetupContext } from '@finite-state/core'
+import {
+  FsClient,
+  ensureFsCli,
+  quoteExecPath,
+  readSetupContext,
+  writeSetupContext,
+} from '@finite-state/core'
 
 /**
  * Pulls the platform's project and version IDs out of fs-cli's log output.
@@ -111,7 +117,9 @@ export async function run(): Promise<void> {
     const collect = (data: Buffer) => {
       output += data.toString()
     }
-    const exitCode = await exec.exec(fsCli, args, {
+    // quoteExecPath: exec splits its first parameter on spaces, so an fs-cli
+    // under a path like C:\Program Files would run as two arguments.
+    const exitCode = await exec.exec(quoteExecPath(fsCli), args, {
       ignoreReturnCode: true,
       listeners: { stdout: collect, stderr: collect },
     })

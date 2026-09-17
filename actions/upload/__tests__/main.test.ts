@@ -62,12 +62,14 @@ const mockEnsureFsCli = vi.fn()
 // rejections below asserting nothing.
 vi.mock('@finite-state/core', async () => {
   const { parseTimeoutMinutes } = await import('../../../packages/core/src/timeout')
+  const { quoteExecPath } = await import('../../../packages/core/src/exec-path')
   return {
     FsClient: vi.fn().mockImplementation(() => ({})),
     ensureFsCli: (...args: unknown[]) => mockEnsureFsCli(...args),
     readSetupContext: vi.fn(),
     writeSetupContext: vi.fn(),
     parseTimeoutMinutes,
+    quoteExecPath,
   }
 })
 
@@ -75,6 +77,11 @@ vi.mock('@finite-state/core', async () => {
 
 import * as core from '@actions/core'
 import { readSetupContext, writeSetupContext } from '@finite-state/core'
+// The parser exec() runs its first parameter through. Reached by file path
+// because @actions/exec does not re-export it, and imported deliberately: it is
+// the thing that splits an unquoted path on spaces, so a quoted fs-cli path is
+// checked against the real implementation rather than an assumption about it.
+import { argStringToArray } from '@actions/exec/lib/toolrunner'
 import { run } from '../src/main'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -141,7 +148,9 @@ describe('upload action', () => {
     await run()
 
     const upload = execCalls[0]
-    expect(upload.binary).toBe('/usr/local/bin/fs-cli')
+    // Quoted on the way to exec, which parses its first parameter as a command
+    // line: what matters is the single path that comes back out.
+    expect(argStringToArray(upload.binary)).toEqual(['/usr/local/bin/fs-cli'])
     expect(upload.args.slice(0, 2)).toEqual(['upload', '/tmp/results.json'])
     expect(upload.args).toEqual(
       expect.arrayContaining([

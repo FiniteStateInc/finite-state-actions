@@ -28,20 +28,24 @@ vi.mock('@actions/core', () => ({
 
 // ── Mock @finite-state/core ────────────────────────────────────────────────────
 //
-// parseTimeoutMinutes is the real one, imported from source rather than from
-// the package's built dist so this suite does not need a core build: it is the
-// whole of this action's input validation, and a stub would leave the rounding
-// and the rejections below asserting nothing.
+// parseTimeoutMinutes and quoteExecPath are the real ones, imported from source
+// rather than from the package's built dist so this suite does not need a core
+// build. parseTimeoutMinutes is the whole of this action's input validation and
+// quoteExecPath decides what exec is actually handed, so stubbing either would
+// leave the rounding, the rejections, and the path assertions below asserting
+// nothing.
 
 const mockEnsureFsCli = vi.fn()
 
 vi.mock('@finite-state/core', async () => {
   const { parseTimeoutMinutes } = await import('../../../packages/core/src/timeout')
+  const { quoteExecPath } = await import('../../../packages/core/src/exec-path')
   return {
     FsClient: vi.fn().mockImplementation(() => ({})),
     ensureFsCli: (...args: unknown[]) => mockEnsureFsCli(...args),
     readSetupContext: vi.fn(),
     parseTimeoutMinutes,
+    quoteExecPath,
   }
 })
 
@@ -49,6 +53,11 @@ vi.mock('@finite-state/core', async () => {
 
 import * as core from '@actions/core'
 import { readSetupContext } from '@finite-state/core'
+// The parser exec() runs its first parameter through. Reached by file path
+// because @actions/exec does not re-export it, and imported deliberately: it is
+// the thing that splits an unquoted path on spaces, so the quoting below is
+// checked against the real implementation rather than an assumption about it.
+import { argStringToArray } from '@actions/exec/lib/toolrunner'
 import { run } from '../src/main'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -61,6 +70,25 @@ function setInputs(inputs: Record<string, string>): void {
 function queryCall() {
   expect(execCalls).toHaveLength(1)
   return execCalls[0]
+}
+
+/**
+ * The executable path, and any arguments, exec() would take from the command
+ * line this action built.
+ */
+function parsedCommandLine() {
+  return argStringToArray(queryCall().binary)
+}
+
+/**
+ * `--poll-timeout` and the argument that follows it, so a value landing
+ * somewhere else in the list is not mistaken for one that follows the flag.
+ */
+function pollTimeoutFlag() {
+  const args = queryCall().args
+  const at = args.indexOf('--poll-timeout')
+  expect(at).toBeGreaterThanOrEqual(0)
+  return args.slice(at, at + 2)
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -86,7 +114,7 @@ describe('wait action', () => {
     await run()
 
     const query = queryCall()
-    expect(query.binary).toBe('/usr/local/bin/fs-cli')
+    expect(parsedCommandLine()).toEqual(['/usr/local/bin/fs-cli'])
     expect(query.args).toEqual([
       'query',
       '--type',
@@ -174,7 +202,7 @@ describe('wait action', () => {
 
     await run()
 
-    expect(queryCall().args).toEqual(expect.arrayContaining(['--poll-timeout', '10']))
+    expect(pollTimeoutFlag()).toEqual(['--poll-timeout', '10'])
     expect(core.warning).not.toHaveBeenCalled()
   })
 
@@ -189,7 +217,7 @@ describe('wait action', () => {
 
     await run()
 
-    expect(queryCall().args).toEqual(expect.arrayContaining(['--poll-timeout', minutes]))
+    expect(pollTimeoutFlag()).toEqual(['--poll-timeout', minutes])
   })
 
   it('warns when the timeout is not a whole number of minutes', async () => {
@@ -219,12 +247,20 @@ describe('wait action', () => {
   // goes through a shell, and it runs whatever path ensureFsCli hands back
   // rather than a bare name it assumes PATH will resolve.
 
-  it('runs the exact binary path ensureFsCli returned, including a Windows .exe', async () => {
-    mockEnsureFsCli.mockResolvedValue('D:\\a\\_temp\\fs-cli\\fs-cli.exe')
+  it.each([
+    ['D:\\a\\_temp\\fs-cli\\fs-cli.exe', 'a GitHub-hosted Windows RUNNER_TEMP'],
+    ['C:\\Program Files\\fs-cli\\fs-cli.exe', 'a self-hosted Windows path with a space'],
+    ['/opt/my tools/fs-cli', 'a POSIX path with a space'],
+    ['/usr/local/bin/fs-cli', 'a plain POSIX path'],
+  ])('runs exactly the path ensureFsCli returned — %s, %s', async (fsCli) => {
+    mockEnsureFsCli.mockResolvedValue(fsCli)
 
     await run()
 
-    expect(queryCall().binary).toBe('D:\\a\\_temp\\fs-cli\\fs-cli.exe')
+    // exec() parses its first parameter as a command line even when an args
+    // array is passed, so the one path that matters is the one that survives
+    // that parse: a single argument, byte-for-byte what ensureFsCli returned.
+    expect(parsedCommandLine()).toEqual([fsCli])
   })
 
   it('never invokes a shell: arguments stay a list and no shell option is set', async () => {
@@ -232,10 +268,11 @@ describe('wait action', () => {
 
     const query = queryCall()
     // A single command string, or windowsVerbatimArguments, would mean argument
-    // quoting differed between runners. Neither is used.
+    // quoting differed between runners. Neither is used: the only keys exec is
+    // given are the two this action sets on purpose.
     expect(Array.isArray(query.args)).toBe(true)
-    expect(query.options).not.toHaveProperty('shell')
-    expect(query.options).not.toHaveProperty('windowsVerbatimArguments')
+    expect(Object.keys(query.options).sort()).toEqual(['env', 'ignoreReturnCode'])
+    expect(query.options.ignoreReturnCode).toBe(true)
   })
 
   it('installs fs-cli itself rather than requiring an earlier step to add it to PATH', async () => {
