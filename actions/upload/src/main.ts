@@ -5,6 +5,7 @@ import {
   FsClient,
   ensureFsCli,
   parseTimeoutMinutes,
+  quoteExecPath,
   readSetupContext,
   writeSetupContext,
 } from '@finite-state/core'
@@ -89,7 +90,9 @@ interface FsCliRun {
 async function runFsCli(binary: string, args: string[], token: string): Promise<FsCliRun> {
   let stdout = ''
 
-  const exitCode = await exec.exec(binary, args, {
+  // quoteExecPath: exec splits its first parameter on spaces, so an fs-cli
+  // under a path like C:\Program Files would run as two arguments.
+  const exitCode = await exec.exec(quoteExecPath(binary), args, {
     ignoreReturnCode: true,
     env: { ...process.env, FS_TOKEN: token } as Record<string, string>,
     listeners: {

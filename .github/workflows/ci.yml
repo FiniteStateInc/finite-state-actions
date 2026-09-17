@@ -67,10 +67,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - name: Verify dist/ files are up-to-date
+      # git status, not git diff: the root .gitignore lists dist/ and *.js, so a
+      # new action's bundle starts out untracked, and git diff reports nothing
+      # for a file git does not track yet. That would ship an action with no
+      # dist/index.js and a green build.
+      - name: Verify dist/ files are up-to-date and tracked
         run: |
-          if [ -n "$(git diff --name-only actions/*/dist/)" ]; then
-            echo "::error::dist/ files are out of date. Run 'pnpm build' and commit the changes."
-            git diff --stat actions/*/dist/
+          if [ -n "$(git status --porcelain --ignored=matching actions/*/dist/)" ]; then
+            echo "::error::dist/ files are out of date or untracked. Run 'pnpm build', then 'git add -f' any new action's dist/ and commit."
+            git status --porcelain --ignored=matching actions/*/dist/
             exit 1
           fi

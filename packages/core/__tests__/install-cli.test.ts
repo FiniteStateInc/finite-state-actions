@@ -71,6 +71,14 @@ const INSTALL_DIR = path.join(RUNNER_TEMP, 'fs-cli')
 const INSTALLED = path.join(INSTALL_DIR, 'fs-cli')
 const PATH_DIRS = [path.join('/usr', 'local', 'bin'), path.join('/usr', 'bin')]
 const ON_PATH = path.join(PATH_DIRS[0], 'fs-cli')
+// Windows: findOnPath tries '.exe' before a bare name, and installFsCli writes
+// 'fs-cli.exe'. A path with a space in it is the case that made every action
+// quote the binary before handing it to @actions/exec.
+// No drive letter: PATH is split on the host's path.delimiter, which is ':' on
+// the ubuntu and macOS legs, and a 'C:' prefix would split with it.
+const WIN_PATH_DIRS = [path.join('/Program Files', 'fs-cli')]
+const WIN_ON_PATH = path.join(WIN_PATH_DIRS[0], 'fs-cli.exe')
+const WIN_INSTALLED = path.join(INSTALL_DIR, 'fs-cli.exe')
 
 function makeClient(downloadUrl = 'https://cdn.example.com/fs-cli?sig=abc', version = 'v2.3.30') {
   return {
@@ -326,5 +334,56 @@ describe('ensureFsCli', () => {
 
     expect(client.getCliDownloadUrl).toHaveBeenCalledWith('linux', 'amd64')
     expect(binary).toBe(INSTALLED)
+  })
+
+  // ── Windows PATH resolution ─────────────────────────────────────────────────
+  //
+  // These stub process.platform rather than relying on the runner, so they
+  // check the win32 branch of findOnPath on every leg of the test matrix
+  // instead of only on the Windows one.
+
+  it('resolves fs-cli.exe on PATH on Windows, where the bare name does not exist', async () => {
+    stubPlatform('win32', 'x64')
+    process.env.PATH = WIN_PATH_DIRS.join(path.delimiter)
+    mockAccess.mockImplementation(async (candidate: string) => {
+      // Only the .exe is there: a bare 'fs-cli' probe must not satisfy it.
+      if (candidate !== WIN_ON_PATH) throw new Error('ENOENT')
+    })
+    onDisk(pe())
+    const client = makeClient()
+
+    const binary = await ensureFsCli(client)
+
+    expect(binary).toBe(WIN_ON_PATH)
+    expect(client.getCliDownloadUrl).not.toHaveBeenCalled()
+  })
+
+  it('replaces a Windows fs-cli.exe on PATH that was built for another platform', async () => {
+    stubPlatform('win32', 'x64')
+    process.env.PATH = WIN_PATH_DIRS.join(path.delimiter)
+    mockAccess.mockImplementation(async (candidate: string) => {
+      if (candidate !== WIN_ON_PATH) throw new Error('ENOENT')
+    })
+    onDisk(elf())
+    serve(pe())
+    const client = makeClient()
+
+    const binary = await ensureFsCli(client)
+
+    expect(client.getCliDownloadUrl).toHaveBeenCalledWith('windows', 'amd64')
+    expect(binary).toBe(WIN_INSTALLED)
+  })
+
+  it('downloads fs-cli.exe on Windows when PATH has none', async () => {
+    stubPlatform('win32', 'x64')
+    process.env.PATH = WIN_PATH_DIRS.join(path.delimiter)
+    mockAccess.mockRejectedValue(new Error('ENOENT'))
+    serve(pe())
+    const client = makeClient()
+
+    const binary = await ensureFsCli(client)
+
+    expect(client.getCliDownloadUrl).toHaveBeenCalledWith('windows', 'amd64')
+    expect(binary).toBe(WIN_INSTALLED)
   })
 })

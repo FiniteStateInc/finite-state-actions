@@ -23,22 +23,45 @@ vi.mock('@actions/exec', () => ({
 
 const mockEnsureFsCli = vi.fn()
 
-vi.mock('@finite-state/core', () => ({
-  readSetupContext: vi.fn(),
-  writeSetupContext: vi.fn(),
-  FsClient: vi.fn().mockImplementation(() => ({})),
-  ensureFsCli: (...args: unknown[]) => mockEnsureFsCli(...args),
-}))
+// quoteExecPath is the real one, imported from source rather than from the
+// package's built dist so this suite does not need a core build: it decides
+// what exec is actually handed, so a stub would leave the binary assertions
+// below checking a value the action never builds.
+vi.mock('@finite-state/core', async () => {
+  const { quoteExecPath } = await import('../../../packages/core/src/exec-path')
+  return {
+    readSetupContext: vi.fn(),
+    writeSetupContext: vi.fn(),
+    FsClient: vi.fn().mockImplementation(() => ({})),
+    ensureFsCli: (...args: unknown[]) => mockEnsureFsCli(...args),
+    quoteExecPath,
+  }
+})
 
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
 
 import * as core from '@actions/core'
 import { readSetupContext, writeSetupContext } from '@finite-state/core'
+// The parser exec() runs its first parameter through. Reached by file path
+// because @actions/exec does not re-export it, and imported deliberately: it is
+// the thing that splits an unquoted path on spaces, so a quoted fs-cli path is
+// checked against the real implementation rather than an assumption about it.
+import { argStringToArray } from '@actions/exec/lib/toolrunner'
 import { parseScanIds, run } from '../src/main'
 
 // ── Fixtures ───────────────────────────────────────────────────────────────────
 
 type ExecOptions = { listeners?: { stdout?: (d: Buffer) => void; stderr?: (d: Buffer) => void } }
+
+/** The executable path exec() would take from a command line the action built. */
+function execPathOf(commandLine: string): string[] {
+  return argStringToArray(commandLine)
+}
+
+/** The command line of the nth fs-cli call, as exec would parse it. */
+function binaryOfCall(n = 0): string[] {
+  return execPathOf(mockExec.mock.calls[n][0] as string)
+}
 
 /** Real fs-cli v2.3.33 output, trimmed to the lines carrying IDs. */
 const FS_CLI_LOG = [
@@ -79,8 +102,9 @@ describe('scan action', () => {
   it('always passes --name and includes --project-id when available', async () => {
     await run()
 
+    expect(binaryOfCall()).toEqual(['/usr/local/bin/fs-cli'])
     expect(mockExec).toHaveBeenCalledWith(
-      '/usr/local/bin/fs-cli',
+      expect.any(String),
       [
         'scan',
         '--endpoint',
@@ -154,13 +178,14 @@ describe('scan action', () => {
 
     await run()
 
+    expect(binaryOfCall()).toEqual(['/usr/local/bin/fs-cli'])
     expect(mockExec).toHaveBeenCalledWith(
-      '/usr/local/bin/fs-cli',
+      expect.any(String),
       expect.arrayContaining(['--name', 'my-firmware']),
       expect.objectContaining({ ignoreReturnCode: true }),
     )
     expect(mockExec).toHaveBeenCalledWith(
-      '/usr/local/bin/fs-cli',
+      expect.any(String),
       expect.not.arrayContaining(['--project-id']),
       expect.objectContaining({ ignoreReturnCode: true }),
     )
@@ -269,8 +294,10 @@ describe('scan action', () => {
     expect(core.setSecret).toHaveBeenCalledWith('standalone-token')
     expect(mockEnsureFsCli).toHaveBeenCalled()
 
-    const [binary, args] = mockExec.mock.calls[0]
-    expect(binary).toBe('/runner/temp/fs-cli/fs-cli')
+    const [, args] = mockExec.mock.calls[0]
+    // Quoted on the way to exec, which parses its first parameter as a command
+    // line: what matters is the single path that comes back out.
+    expect(binaryOfCall()).toEqual(['/runner/temp/fs-cli/fs-cli'])
     expect(args).toEqual(
       expect.arrayContaining([
         '--endpoint',
