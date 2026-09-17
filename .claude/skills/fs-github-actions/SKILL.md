@@ -514,7 +514,7 @@ Blocks until the platform finishes scanning a version, so a later step never rea
 
 **Outputs:** none. The step passes or fails; there is no partial-success status to report.
 
-**Behavior:** A composite action — no bundle, no `dist/`. It runs `fs-cli query --type scan --format json --endpoint https://<domain> --version-id <id> --wait --fail-on-scan-incomplete`, the same call `upload` makes under `wait-for-completion`. `--wait` makes fs-cli poll; `--fail-on-scan-incomplete` fails the step on a failed scan, a poll timeout, or a version with no scans at all. The token goes through `FS_TOKEN`, never on the command line, and every input reaches the script through the environment rather than being spliced into bash source. The script lives at `actions/wait/wait.sh`; `actions/wait/__tests__/action.test.sh` checks it against a stub fs-cli, and CI runs that directly since pnpm skips a package with no `package.json`.
+**Behavior:** A bundled `node24` action like the rest. It runs `fs-cli query --type scan --format json --endpoint https://<domain> --version-id <id> --wait --fail-on-scan-incomplete`, the same call `upload` makes under `wait-for-completion`. `--wait` makes fs-cli poll; `--fail-on-scan-incomplete` fails the step on a failed scan, a poll timeout, or a version with no scans at all. The token goes through `FS_TOKEN`, never on the command line. fs-cli is invoked with an argument list and no shell, so it behaves the same on ubuntu, macOS and Windows runners — this action was a bash composite through v2.0, which on Windows meant Git Bash.
 
 **Example:**
 
@@ -533,7 +533,7 @@ Blocks until the platform finishes scanning a version, so a later step never rea
 
 **Gotchas:**
 
-- **It does not install fs-cli.** Run `setup`, `scan` or `upload` earlier in the same job — each adds fs-cli to `PATH`. Without one, `wait` fails with `fs-cli not found` rather than installing anything.
+- **It reuses the fs-cli an earlier step installed, and downloads one when there is none.** `setup`, `scan` or `upload` earlier in the job is the normal case, but `wait` with an `api-token` and a `version-id` works as the only Finite State step in a job.
 - **`version-id` is a platform version ID, not a label.** It defaults to `FINITE_STATE_VERSION_ID`, which `scan` and `upload` export after reading it back from fs-cli. When `scan` could not parse an ID it warns, and `wait` then fails with `No version ID`.
 - **It assumes a scan row exists for the version.** `--fail-on-scan-incomplete` counts "no scans at all" as a failure, and `scan`/`upload` returning only proves the _version_ was created — the wait relies on fs-cli's `--wait` tolerating the window before the platform records a scan against it. `upload --wait-for-completion` makes the identical call and has shipped since v2, so this is the same assumption in a separate step. An immediate no-scans failure is the symptom if that window is ever real.
 - **Redundant after `upload` with `wait-for-completion: true`.** That input runs the same query inside the upload step. Use one or the other, not both.
@@ -541,7 +541,7 @@ Blocks until the platform finishes scanning a version, so a later step never rea
 - **`setup` alone does not satisfy it.** `setup` exports `FINITE_STATE_VERSION_ID` only when you passed it a `version-id`, so `setup` → `wait` fails with `No version ID` unless a `scan` or `upload` ran between them or you pass `version-id` yourself.
 - **`timeout` is per step.** `upload`'s `timeout` bounds its own upload and its own poll under `wait-for-completion`; it does not carry into a separate `wait` step, which falls back to fs-cli's 30-minute default unless given its own `timeout`.
 - **It reports pass/fail, not status.** `upload` publishes `scan-status` because it parses the query JSON; `wait` takes fs-cli's exit code as the verdict — under `--fail-on-scan-incomplete` a zero exit means every scan settled — and reads no JSON, so there is no status output to consume. Use `upload` with `wait-for-completion: true` when a downstream step needs the status string.
-- **It reuses whatever fs-cli is on `PATH`.** `ensureFsCli` in the TS actions sniffs the executable header and re-downloads a foreign binary; `wait` does not repeat that check, so it trusts the fs-cli that the earlier `setup`/`scan`/`upload` step validated and installed.
+- **It validates the fs-cli it finds on `PATH`.** Like `scan` and `upload` it goes through `ensureFsCli`, which resolves the runner's OS and architecture first, sniffs the executable header of the fs-cli on `PATH`, and downloads a correct one when that header is for another platform.
 
 ---
 
@@ -999,14 +999,13 @@ curl -s -H "X-Authorization: $FS_TOKEN" \
 
 ### Scan timeouts
 
-| Symptom                              | Cause                                                 | Fix                                                                         |
-| ------------------------------------ | ----------------------------------------------------- | --------------------------------------------------------------------------- |
-| `upload` fails with "Scan timed out" | Scan outran fs-cli's 30-minute default                | Raise `timeout` (whole seconds, e.g. `3600`) or drop `wait-for-completion`  |
-| `scan-status` stays `RUNNING`        | Platform-side processing delay                        | Check the FS platform for scan status; retry if needed                      |
-| `upload` fails with "File not found" | Build artifact not available                          | Ensure the build step runs before upload; check the file path               |
-| `wait` fails with "fs-cli not found" | No `setup`, `scan` or `upload` ran earlier in the job | Add one of them before `wait` — `wait` does not install fs-cli              |
-| `wait` fails with "No version ID"    | `scan` could not parse an ID, or no scan/upload ran   | Pass `version-id` explicitly; the `scan` step warns when it cannot read one |
-| SBOM or report has no findings       | Exported before the platform finished scanning        | `wait-for-completion: true` on `upload`, or the `wait` action after `scan`  |
+| Symptom                              | Cause                                               | Fix                                                                         |
+| ------------------------------------ | --------------------------------------------------- | --------------------------------------------------------------------------- |
+| `upload` fails with "Scan timed out" | Scan outran fs-cli's 30-minute default              | Raise `timeout` (whole seconds, e.g. `3600`) or drop `wait-for-completion`  |
+| `scan-status` stays `RUNNING`        | Platform-side processing delay                      | Check the FS platform for scan status; retry if needed                      |
+| `upload` fails with "File not found" | Build artifact not available                        | Ensure the build step runs before upload; check the file path               |
+| `wait` fails with "No version ID"    | `scan` could not parse an ID, or no scan/upload ran | Pass `version-id` explicitly; the `scan` step warns when it cannot read one |
+| SBOM or report has no findings       | Exported before the platform finished scanning      | `wait-for-completion: true` on `upload`, or the `wait` action after `scan`  |
 
 ### Source scan (fs-cli)
 

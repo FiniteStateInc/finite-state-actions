@@ -56,12 +56,20 @@ vi.mock('fs/promises', () => ({
 
 const mockEnsureFsCli = vi.fn()
 
-vi.mock('@finite-state/core', () => ({
-  FsClient: vi.fn().mockImplementation(() => ({})),
-  ensureFsCli: (...args: unknown[]) => mockEnsureFsCli(...args),
-  readSetupContext: vi.fn(),
-  writeSetupContext: vi.fn(),
-}))
+// parseTimeoutMinutes is the real one, imported from source rather than from
+// the package's built dist so this suite does not need a core build: it is the
+// timeout input's whole validation, and a stub would leave the rounding and the
+// rejections below asserting nothing.
+vi.mock('@finite-state/core', async () => {
+  const { parseTimeoutMinutes } = await import('../../../packages/core/src/timeout')
+  return {
+    FsClient: vi.fn().mockImplementation(() => ({})),
+    ensureFsCli: (...args: unknown[]) => mockEnsureFsCli(...args),
+    readSetupContext: vi.fn(),
+    writeSetupContext: vi.fn(),
+    parseTimeoutMinutes,
+  }
+})
 
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
 
