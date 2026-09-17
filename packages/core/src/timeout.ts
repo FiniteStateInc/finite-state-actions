@@ -1,21 +1,28 @@
-import * as core from '@actions/core'
-
 /**
- * Turns a `timeout` input in seconds into the whole minutes fs-cli accepts.
+ * Turns a `timeout` input in seconds into the whole minutes fs-cli accepts,
+ * with the annotation to emit when that conversion is not exact.
  *
- * Returns undefined for an empty input, which leaves fs-cli its own 30-minute
- * default rather than a bound this action invented. Shared by every action with
- * a `timeout` input so the parsing, the rejections, and the rounding warning
- * cannot drift apart between them.
+ * `minutes` is undefined for an empty input, which leaves fs-cli its own
+ * 30-minute default rather than a bound this action invented. Shared by every
+ * action with a `timeout` input so the parsing, the rejections, and the
+ * rounding cannot drift apart between them.
+ *
+ * Returns the rounding message rather than writing it, so the caller titles it
+ * and core stays usable without the Actions logging channel.
  */
-export function parseTimeoutMinutes(input: string | undefined): number | undefined {
+export function timeoutSecondsToMinutes(input: string | undefined): {
+  minutes?: number
+  warning?: string
+} {
   const timeout = (input ?? '').trim()
   if (!timeout) {
-    return undefined
+    return {}
   }
 
   // Deliberately strict: parseInt would read "600s" as 600 and "10 minutes" as
-  // 10, quietly applying a bound the caller did not ask for.
+  // 10, quietly applying a bound the caller did not ask for. A leading zero is
+  // base 10 here, where the bash implementation this replaced read "0600" as
+  // octal 384 and aborted outright on "09".
   if (!/^\d+$/.test(timeout)) {
     throw new Error(
       `timeout must be a whole number of seconds, got "${timeout}". ` +
@@ -33,11 +40,13 @@ export function parseTimeoutMinutes(input: string | undefined): number | undefin
   // rounds up — say which bound will actually apply rather than waiting longer
   // than asked without mentioning it.
   if (seconds % 60 !== 0) {
-    core.warning(
-      `timeout ${seconds}s is not a whole number of minutes, which is all fs-cli accepts; ` +
+    return {
+      minutes,
+      warning:
+        `timeout ${seconds}s is not a whole number of minutes, which is all fs-cli accepts; ` +
         `rounding up to ${minutes} minute(s).`,
-    )
+    }
   }
 
-  return minutes
+  return { minutes }
 }

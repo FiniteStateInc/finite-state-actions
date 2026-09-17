@@ -56,19 +56,19 @@ vi.mock('fs/promises', () => ({
 
 const mockEnsureFsCli = vi.fn()
 
-// parseTimeoutMinutes is the real one, imported from source rather than from
+// timeoutSecondsToMinutes is the real one, imported from source rather than from
 // the package's built dist so this suite does not need a core build: it is the
 // timeout input's whole validation, and a stub would leave the rounding and the
 // rejections below asserting nothing.
 vi.mock('@finite-state/core', async () => {
-  const { parseTimeoutMinutes } = await import('../../../packages/core/src/timeout')
+  const { timeoutSecondsToMinutes } = await import('../../../packages/core/src/timeout')
   const { quoteExecPath } = await import('../../../packages/core/src/exec-path')
   return {
     FsClient: vi.fn().mockImplementation(() => ({})),
     ensureFsCli: (...args: unknown[]) => mockEnsureFsCli(...args),
     readSetupContext: vi.fn(),
     writeSetupContext: vi.fn(),
-    parseTimeoutMinutes,
+    timeoutSecondsToMinutes,
     quoteExecPath,
   }
 })
@@ -77,11 +77,6 @@ vi.mock('@finite-state/core', async () => {
 
 import * as core from '@actions/core'
 import { readSetupContext, writeSetupContext } from '@finite-state/core'
-// The parser exec() runs its first parameter through. Reached by file path
-// because @actions/exec does not re-export it, and imported deliberately: it is
-// the thing that splits an unquoted path on spaces, so a quoted fs-cli path is
-// checked against the real implementation rather than an assumption about it.
-import { argStringToArray } from '@actions/exec/lib/toolrunner'
 import { run } from '../src/main'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -149,8 +144,8 @@ describe('upload action', () => {
 
     const upload = execCalls[0]
     // Quoted on the way to exec, which parses its first parameter as a command
-    // line: what matters is the single path that comes back out.
-    expect(argStringToArray(upload.binary)).toEqual(['/usr/local/bin/fs-cli'])
+    // line even when an args array is passed.
+    expect(upload.binary).toBe('"/usr/local/bin/fs-cli"')
     expect(upload.args.slice(0, 2)).toEqual(['upload', '/tmp/results.json'])
     expect(upload.args).toEqual(
       expect.arrayContaining([

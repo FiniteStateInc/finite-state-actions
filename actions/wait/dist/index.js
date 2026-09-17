@@ -63983,15 +63983,28 @@ function writeSetupContext(ctx) {
         core.setOutput('version-id', ctx.versionId);
     }
 }
+/**
+ * Trims a context value and treats a whitespace-only one as absent.
+ *
+ * `core.getInput` trims its own result, but an environment variable arrives
+ * verbatim: a token assembled from a `vars.` value, or written by an earlier
+ * step with a trailing newline, would otherwise be sent to the API as-is and
+ * fail authentication, and a whitespace-only `FINITE_STATE_VERSION_ID` would
+ * count as a version and be queried.
+ */
+function clean(value) {
+    const trimmed = value?.trim();
+    return trimmed ? trimmed : undefined;
+}
 function readSetupContext(overrides) {
-    const apiToken = overrides?.apiToken || process.env[ENV_KEYS.apiToken];
+    const apiToken = clean(overrides?.apiToken) ?? clean(process.env[ENV_KEYS.apiToken]);
     if (!apiToken) {
         throw new Error(`${ENV_KEYS.apiToken} is not set. Run the finite-state/setup action first, or provide api-token as an input.`);
     }
-    const domain = overrides?.domain || process.env[ENV_KEYS.domain] || 'app.finitestate.io';
-    const projectId = overrides?.projectId || process.env[ENV_KEYS.projectId] || undefined;
-    const projectName = overrides?.projectName || process.env[ENV_KEYS.projectName] || undefined;
-    const versionId = overrides?.versionId || process.env[ENV_KEYS.versionId] || undefined;
+    const domain = clean(overrides?.domain) ?? clean(process.env[ENV_KEYS.domain]) ?? 'app.finitestate.io';
+    const projectId = clean(overrides?.projectId) ?? clean(process.env[ENV_KEYS.projectId]);
+    const projectName = clean(overrides?.projectName) ?? clean(process.env[ENV_KEYS.projectName]);
+    const versionId = clean(overrides?.versionId) ?? clean(process.env[ENV_KEYS.versionId]);
     return { apiToken, domain, projectId, projectName, versionId };
 }
 //# sourceMappingURL=context.js.map
@@ -64012,16 +64025,23 @@ exports.quoteExecPath = quoteExecPath;
  * args array is passed, so a bare path splits on spaces: fs-cli at
  * `C:\Program Files\fs-cli\fs-cli.exe` is run as `C:\Program` with
  * `Files\fs-cli\fs-cli.exe` prepended to the arguments, and the step fails with
- * a spawn error naming a path nobody wrote. Quoting round-trips through that
- * parser — inside double quotes it keeps a single backslash as-is, and an
- * embedded quote has to arrive escaped.
+ * a spawn error naming a path nobody wrote.
+ *
+ * Inside double quotes that parser keeps a lone backslash as-is, treats `\\` as
+ * one backslash, and `\"` as a literal quote — so only a backslash run at the
+ * end of the path (which would otherwise escape the closing quote) and an
+ * embedded quote need escaping.
  *
  * Shared by every action that runs a binary whose path it did not choose (one
  * under `RUNNER_TEMP`, or one found on `PATH`) so the quoting cannot be right
  * in one action and missing in the next.
  */
 function quoteExecPath(binary) {
-    return `"${binary.replace(/"/g, '\\"')}"`;
+    const escaped = binary
+        .replace(/"/g, '\\"')
+        // Doubled so the closing quote is not escaped by them.
+        .replace(/\\+$/, (backslashes) => backslashes + backslashes);
+    return `"${escaped}"`;
 }
 //# sourceMappingURL=exec-path.js.map
 
@@ -64612,7 +64632,11 @@ async function readHeader(file) {
  * Returns the path to `binary` if it is executable on PATH, else undefined.
  */
 async function findOnPath(binary) {
-    const extensions = process.platform === 'win32' ? ['.exe', '.cmd', ''] : [''];
+    // No '.cmd': a batch file is text, so it can never pass the executable-header
+    // check below, and @actions/exec runs a batch file through the Windows
+    // command interpreter, which is the one path where argument quoting differs
+    // between runners.
+    const extensions = process.platform === 'win32' ? ['.exe', ''] : [''];
     for (const dir of (process.env.PATH || '').split(path.delimiter)) {
         if (!dir)
             continue;
@@ -65080,61 +65104,33 @@ function parseReportDirectory(reportDir) {
 /***/ }),
 
 /***/ 4893:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+/***/ ((__unused_webpack_module, exports) => {
 
 "use strict";
 
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.parseTimeoutMinutes = parseTimeoutMinutes;
-const core = __importStar(__nccwpck_require__(4442));
+exports.timeoutSecondsToMinutes = timeoutSecondsToMinutes;
 /**
- * Turns a `timeout` input in seconds into the whole minutes fs-cli accepts.
+ * Turns a `timeout` input in seconds into the whole minutes fs-cli accepts,
+ * with the annotation to emit when that conversion is not exact.
  *
- * Returns undefined for an empty input, which leaves fs-cli its own 30-minute
- * default rather than a bound this action invented. Shared by every action with
- * a `timeout` input so the parsing, the rejections, and the rounding warning
- * cannot drift apart between them.
+ * `minutes` is undefined for an empty input, which leaves fs-cli its own
+ * 30-minute default rather than a bound this action invented. Shared by every
+ * action with a `timeout` input so the parsing, the rejections, and the
+ * rounding cannot drift apart between them.
+ *
+ * Returns the rounding message rather than writing it, so the caller titles it
+ * and core stays usable without the Actions logging channel.
  */
-function parseTimeoutMinutes(input) {
+function timeoutSecondsToMinutes(input) {
     const timeout = (input ?? '').trim();
     if (!timeout) {
-        return undefined;
+        return {};
     }
     // Deliberately strict: parseInt would read "600s" as 600 and "10 minutes" as
-    // 10, quietly applying a bound the caller did not ask for.
+    // 10, quietly applying a bound the caller did not ask for. A leading zero is
+    // base 10 here, where the bash implementation this replaced read "0600" as
+    // octal 384 and aborted outright on "09".
     if (!/^\d+$/.test(timeout)) {
         throw new Error(`timeout must be a whole number of seconds, got "${timeout}". ` +
             `Leave it unset to use fs-cli's own default.`);
@@ -65148,10 +65144,13 @@ function parseTimeoutMinutes(input) {
     // rounds up — say which bound will actually apply rather than waiting longer
     // than asked without mentioning it.
     if (seconds % 60 !== 0) {
-        core.warning(`timeout ${seconds}s is not a whole number of minutes, which is all fs-cli accepts; ` +
-            `rounding up to ${minutes} minute(s).`);
+        return {
+            minutes,
+            warning: `timeout ${seconds}s is not a whole number of minutes, which is all fs-cli accepts; ` +
+                `rounding up to ${minutes} minute(s).`,
+        };
     }
-    return minutes;
+    return { minutes };
 }
 //# sourceMappingURL=timeout.js.map
 
@@ -65200,31 +65199,68 @@ exports.run = run;
 const core = __importStar(__nccwpck_require__(4442));
 const exec = __importStar(__nccwpck_require__(7167));
 const core_1 = __nccwpck_require__(2950);
+/**
+ * A failure this action raises itself, carrying the annotation title the shell
+ * version used and the code to exit with.
+ *
+ * The titles are the ones `wait.sh` wrote, so a log filter or dashboard keyed
+ * on `title=No version ID` keeps matching. `exitCode` is fs-cli's own for a
+ * scan that did not finish, which the shell version passed through with
+ * `exit "$QUERY_EXIT"`.
+ */
+class WaitFailure extends Error {
+    title;
+    exitCode;
+    constructor(message, title, exitCode = 1) {
+        super(message);
+        this.title = title;
+        this.exitCode = exitCode;
+    }
+}
+/**
+ * Runs `read`, re-raising whatever it throws under `title`. Awaits, so an
+ * async `read` rejecting is titled too rather than slipping past as a plain
+ * error.
+ */
+async function titled(title, read) {
+    try {
+        return await read();
+    }
+    catch (err) {
+        throw new WaitFailure(err instanceof Error ? err.message : String(err), title);
+    }
+}
 async function run() {
     try {
         // ── Read inputs ──────────────────────────────────────────────────────────
         const apiTokenOverride = core.getInput('api-token') || undefined;
         const domainOverride = core.getInput('domain') || undefined;
         const versionIdInput = core.getInput('version-id') || undefined;
-        // Unset leaves fs-cli its own 30-minute default.
-        const timeoutMinutes = (0, core_1.parseTimeoutMinutes)(core.getInput('timeout'));
         // ── Read setup context, falling back to this action's own inputs ─────────
         // Running without setup, scan or upload is supported: pass api-token here.
-        const ctx = (0, core_1.readSetupContext)({
+        // Read before the timeout is parsed so a job missing its token fails on
+        // the token, not on whichever other input also happens to be wrong.
+        const ctx = await titled('No API token', () => (0, core_1.readSetupContext)({
             apiToken: apiTokenOverride,
             domain: domainOverride,
             versionId: versionIdInput,
-        });
+        }));
         // Masks a token that came from this action's input rather than setup, where
-        // it is masked already.
+        // it is masked already. First thing after the read, so nothing below can
+        // log it unmasked.
         core.setSecret(ctx.apiToken);
         if (!ctx.versionId) {
-            throw new Error('No version to wait on. Run scan or upload first, or pass version-id. It is the ' +
-                "platform's version ID, not a label like v1.2.3.");
+            throw new WaitFailure('No version to wait on. Run scan or upload first, or pass version-id. It is the ' +
+                "platform's version ID, not a label like v1.2.3.", 'No version ID');
+        }
+        // Unset leaves fs-cli its own 30-minute default.
+        const timeout = await titled('Bad timeout', () => (0, core_1.timeoutSecondsToMinutes)(core.getInput('timeout')));
+        if (timeout.warning) {
+            core.warning(timeout.warning, { title: 'Timeout rounded' });
         }
         // Reuses an fs-cli that setup, scan or upload already put on PATH and
         // downloads one only when this is the first Finite State step in the job.
-        const fsCli = await (0, core_1.ensureFsCli)(new core_1.FsClient({ apiToken: ctx.apiToken, domain: ctx.domain }));
+        const fsCli = await titled('fs-cli not found', () => (0, core_1.ensureFsCli)(new core_1.FsClient({ apiToken: ctx.apiToken, domain: ctx.domain })));
         core.info(`Waiting for scans on version ${ctx.versionId} to finish.`);
         // --wait polls; --fail-on-scan-incomplete fails the step on a failed scan,
         // a poll timeout, or a version with no scans at all, so a later step never
@@ -65235,8 +65271,8 @@ async function run() {
         // because it publishes a scan-status output that must not contradict the
         // exit code; this action has no such output and so has nothing to parse.
         //
-        // The token goes through FS_TOKEN so it stays out of the argument list.
-        // The path is quoted because exec splits its first parameter on spaces.
+        // The token goes through FS_TOKEN so it stays out of the argument list, and
+        // the path is quoted because exec splits its first parameter on spaces.
         const exitCode = await exec.exec((0, core_1.quoteExecPath)(fsCli), [
             'query',
             '--type',
@@ -65248,7 +65284,7 @@ async function run() {
             '--version-id',
             ctx.versionId,
             '--wait',
-            ...(timeoutMinutes ? ['--poll-timeout', String(timeoutMinutes)] : []),
+            ...(timeout.minutes ? ['--poll-timeout', String(timeout.minutes)] : []),
             '--fail-on-scan-incomplete',
         ], {
             ignoreReturnCode: true,
@@ -65257,13 +65293,20 @@ async function run() {
         if (exitCode !== 0) {
             // fs-cli has already printed why; this adds the context a bare non-zero
             // exit does not carry.
-            throw new Error(`fs-cli query exited ${exitCode} for version ${ctx.versionId} on ${ctx.domain}. ` +
+            throw new WaitFailure(`fs-cli query exited ${exitCode} for version ${ctx.versionId} on ${ctx.domain}. ` +
                 `The scan failed, ran past the poll timeout, or the version has no scans. ` +
-                `See the fs-cli output above.`);
+                `See the fs-cli output above.`, 'Scan did not finish', exitCode);
         }
         core.info(`Scans on version ${ctx.versionId} finished.`);
     }
     catch (err) {
+        if (err instanceof WaitFailure) {
+            // core.setFailed would drop the title and force exit 1. Both are what the
+            // shell version published, so both are kept.
+            core.error(err.message, { title: err.title });
+            process.exitCode = err.exitCode;
+            return;
+        }
         core.setFailed(err instanceof Error ? err.message : String(err));
     }
 }

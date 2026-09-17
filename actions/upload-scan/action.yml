@@ -14,14 +14,18 @@ inputs:
   type:
     description: 'Scan type: sca, sast, config, vulnerability-analysis, sbom, third-party'
     required: true
-    # Carries the whole action's deprecation notice, because `type` is required
-    # and so always set. GitHub logs it itself, on every runner OS — where the
+    # Carries the whole action's deprecation notice, on `type` and `file`
+    # because those two are the inputs an upload cannot work without: GitHub
+    # does not enforce `required`, and it logs a deprecationMessage only for an
+    # input the caller actually passed, so a notice on one optional input could
+    # go unseen. GitHub writes it itself on every runner OS — where the
     # `shell: bash` step this replaced failed outright on a self-hosted Windows
     # runner with no Git for Windows.
     deprecationMessage: 'actions/upload-scan is deprecated and will be removed in v3. Switch to FiniteStateInc/finite-state-actions/actions/upload@v2 — same inputs and outputs.'
   file:
     description: 'Path to the file to upload'
     required: true
+    deprecationMessage: 'actions/upload-scan is deprecated and will be removed in v3. Switch to FiniteStateInc/finite-state-actions/actions/upload@v2 — same inputs and outputs.'
   project-id:
     description: 'Project ID override (falls back to setup context)'
     required: false

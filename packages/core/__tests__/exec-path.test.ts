@@ -15,4 +15,18 @@ describe('quoteExecPath', () => {
   it('escapes an embedded quote, which would otherwise end the quoted run early', () => {
     expect(quoteExecPath('/tmp/we"ird/fs-cli')).toBe('"/tmp/we\\"ird/fs-cli"')
   })
+
+  it.each([
+    ['C:\\tools\\', '"C:\\tools\\\\"'],
+    ['C:\\tools\\\\', '"C:\\tools\\\\\\\\"'],
+  ])(
+    'doubles the trailing backslashes of %j so they do not escape the closing quote',
+    (binary, quoted) => {
+      expect(quoteExecPath(binary)).toBe(quoted)
+    },
+  )
+
+  it('leaves backslashes inside the path alone, which the parser keeps as-is', () => {
+    expect(quoteExecPath('C:\\a\\b\\fs-cli.exe')).toBe('"C:\\a\\b\\fs-cli.exe"')
+  })
 })

@@ -225,7 +225,11 @@ async function readHeader(file: string): Promise<Buffer> {
  * Returns the path to `binary` if it is executable on PATH, else undefined.
  */
 async function findOnPath(binary: string): Promise<string | undefined> {
-  const extensions = process.platform === 'win32' ? ['.exe', '.cmd', ''] : ['']
+  // No '.cmd': a batch file is text, so it can never pass the executable-header
+  // check below, and @actions/exec runs a batch file through the Windows
+  // command interpreter, which is the one path where argument quoting differs
+  // between runners.
+  const extensions = process.platform === 'win32' ? ['.exe', ''] : ['']
 
   for (const dir of (process.env.PATH || '').split(path.delimiter)) {
     if (!dir) continue

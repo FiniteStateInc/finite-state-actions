@@ -4,7 +4,7 @@ import { glob } from 'fs/promises'
 import {
   FsClient,
   ensureFsCli,
-  parseTimeoutMinutes,
+  timeoutSecondsToMinutes,
   quoteExecPath,
   readSetupContext,
   writeSetupContext,
@@ -299,9 +299,14 @@ export async function run(): Promise<void> {
 
     // timeout is optional: unset means fs-cli's own defaults (30 minutes for
     // the upload, 30 for the scan poll) rather than a bound we invented. The
-    // parsing, the rejections and the rounding warning live in core so they
+    // parsing, the rejections and the rounding message live in core so they
     // stay identical to the wait action's.
-    const timeoutMinutes = parseTimeoutMinutes(core.getInput('timeout'))
+    const { minutes: timeoutMinutes, warning: timeoutWarning } = timeoutSecondsToMinutes(
+      core.getInput('timeout'),
+    )
+    if (timeoutWarning) {
+      core.warning(timeoutWarning)
+    }
 
     if (core.getInput('project-type')) {
       core.warning(

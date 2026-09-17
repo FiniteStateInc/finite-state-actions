@@ -27,18 +27,33 @@ export function writeSetupContext(ctx: SetupContext): void {
   }
 }
 
+/**
+ * Trims a context value and treats a whitespace-only one as absent.
+ *
+ * `core.getInput` trims its own result, but an environment variable arrives
+ * verbatim: a token assembled from a `vars.` value, or written by an earlier
+ * step with a trailing newline, would otherwise be sent to the API as-is and
+ * fail authentication, and a whitespace-only `FINITE_STATE_VERSION_ID` would
+ * count as a version and be queried.
+ */
+function clean(value: string | undefined): string | undefined {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : undefined
+}
+
 export function readSetupContext(overrides?: Partial<SetupContext>): SetupContext {
-  const apiToken = overrides?.apiToken || process.env[ENV_KEYS.apiToken]
+  const apiToken = clean(overrides?.apiToken) ?? clean(process.env[ENV_KEYS.apiToken])
   if (!apiToken) {
     throw new Error(
       `${ENV_KEYS.apiToken} is not set. Run the finite-state/setup action first, or provide api-token as an input.`,
     )
   }
 
-  const domain = overrides?.domain || process.env[ENV_KEYS.domain] || 'app.finitestate.io'
-  const projectId = overrides?.projectId || process.env[ENV_KEYS.projectId] || undefined
-  const projectName = overrides?.projectName || process.env[ENV_KEYS.projectName] || undefined
-  const versionId = overrides?.versionId || process.env[ENV_KEYS.versionId] || undefined
+  const domain =
+    clean(overrides?.domain) ?? clean(process.env[ENV_KEYS.domain]) ?? 'app.finitestate.io'
+  const projectId = clean(overrides?.projectId) ?? clean(process.env[ENV_KEYS.projectId])
+  const projectName = clean(overrides?.projectName) ?? clean(process.env[ENV_KEYS.projectName])
+  const versionId = clean(overrides?.versionId) ?? clean(process.env[ENV_KEYS.versionId])
 
   return { apiToken, domain, projectId, projectName, versionId }
 }
