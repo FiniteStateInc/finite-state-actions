@@ -34,8 +34,16 @@ jobs:
       - run: pnpm -C packages/core run build
       - run: pnpm typecheck
 
+  # Every OS a GitHub-hosted runner offers, because all eight actions run on all
+  # three and nothing else checked that. Windows is the reason this is a matrix:
+  # the wait action used to be a composite shelling out to bash, which on
+  # Windows means Git Bash, and it is now node24 like the rest.
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v5
@@ -47,46 +55,9 @@ jobs:
       - run: pnpm -C packages/core run build
       - run: pnpm test
 
-  # actions/wait is a composite action with no package.json, so pnpm -r skips
-  # it and its checks are a shell script. macOS is in the matrix because it
-  # ships bash 3.2, where `set -u` treats an empty array expansion as an error —
-  # the case wait.sh guards against and ubuntu's bash 5 would never catch.
-  wait-action:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v6
-      # Both, because they differ on macOS: PATH leads to a Homebrew bash 5
-      # there, while /bin/bash is 3.2. The checks run under /bin/bash below and
-      # hand that same interpreter to wait.sh, so /bin/bash is the one that
-      # decides what gets covered.
-      - name: bash versions
-        run: |
-          echo "PATH bash: $(bash -c 'echo "$BASH_VERSION"')"
-          echo "/bin/bash: $(/bin/bash -c 'echo "$BASH_VERSION"')"
-      # The macOS leg is only worth running if it is genuinely bash 3.2 — that
-      # is the coverage CLAUDE.md claims. If the image ever ships a newer
-      # /bin/bash, fail here rather than let the claim rot silently.
-      - name: assert macOS runs bash 3.x
-        if: matrix.os == 'macos-latest'
-        run: |
-          version=$(/bin/bash -c 'echo ${BASH_VERSINFO[0]}')
-          echo "/bin/bash major version: $version"
-          if [ "$version" -ge 4 ]; then
-            echo "::error title=bash 3.2 coverage lost::/bin/bash on this image is version $version, so the empty-array guard in wait.sh is no longer exercised anywhere. Update the claim in CLAUDE.md and ci.yml, or pin a bash 3.2 to run these checks under."
-            exit 1
-          fi
-      - run: /bin/bash actions/wait/__tests__/action.test.sh
-      - name: shellcheck
-        run: shellcheck actions/wait/wait.sh actions/wait/__tests__/action.test.sh
-        if: matrix.os == 'ubuntu-latest'
-
   build:
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test, wait-action]
+    needs: [lint, typecheck, test]
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v5

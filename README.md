@@ -237,7 +237,7 @@ fs-cli's 30-minute default — and fails on a scan that fails or outruns the tim
 before it returned in seconds and reported `SUBMITTED`.
 
 After `scan`, which has no such input, add the `wait` action. It needs no inputs — `scan`
-puts `fs-cli` on `PATH` and exports the token, domain and version ID:
+exports the token, domain and version ID, and puts `fs-cli` on `PATH` for it to reuse:
 
 ```yaml
 - uses: FiniteStateInc/finite-state-actions/actions/scan@v2
@@ -268,8 +268,9 @@ so a later step never reads partial results from a green job.
 
 Four things to know:
 
-- **It does not install `fs-cli`.** Run `setup`, `scan` or `upload` earlier in the same job,
-  each of which adds it to `PATH`. Without one, `wait` fails rather than installing anything.
+- **It reuses the `fs-cli` an earlier step installed, and downloads one when there is
+  none.** So `setup`, `scan` or `upload` earlier in the job is the normal case, but `wait`
+  with an `api-token` and a `version-id` works as the only Finite State step in a job.
 - **`FINITE_STATE_VERSION_ID` comes from `scan` or `upload`.** `setup` exports it only when
   you passed it `version-id`, so `setup` → `wait` on its own has no version to wait on.
 - **It waits on one version.** Two uploads to different versions in the same job need a

@@ -64357,6 +64357,7 @@ __exportStar(__nccwpck_require__(7329), exports);
 __exportStar(__nccwpck_require__(1576), exports);
 __exportStar(__nccwpck_require__(9754), exports);
 __exportStar(__nccwpck_require__(9235), exports);
+__exportStar(__nccwpck_require__(4893), exports);
 //# sourceMappingURL=index.js.map
 
 /***/ }),
@@ -65048,6 +65049,84 @@ function parseReportDirectory(reportDir) {
 
 /***/ }),
 
+/***/ 4893:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.parseTimeoutMinutes = parseTimeoutMinutes;
+const core = __importStar(__nccwpck_require__(4442));
+/**
+ * Turns a `timeout` input in seconds into the whole minutes fs-cli accepts.
+ *
+ * Returns undefined for an empty input, which leaves fs-cli its own 30-minute
+ * default rather than a bound this action invented. Shared by every action with
+ * a `timeout` input so the parsing, the rejections, and the rounding warning
+ * cannot drift apart between them.
+ */
+function parseTimeoutMinutes(input) {
+    const timeout = (input ?? '').trim();
+    if (!timeout) {
+        return undefined;
+    }
+    // Deliberately strict: parseInt would read "600s" as 600 and "10 minutes" as
+    // 10, quietly applying a bound the caller did not ask for.
+    if (!/^\d+$/.test(timeout)) {
+        throw new Error(`timeout must be a whole number of seconds, got "${timeout}". ` +
+            `Leave it unset to use fs-cli's own default.`);
+    }
+    const seconds = parseInt(timeout, 10);
+    if (seconds <= 0) {
+        throw new Error(`timeout must be a positive number of seconds, got "${timeout}".`);
+    }
+    const minutes = Math.max(1, Math.ceil(seconds / 60));
+    // fs-cli takes whole minutes, so anything that is not an exact multiple of 60
+    // rounds up — say which bound will actually apply rather than waiting longer
+    // than asked without mentioning it.
+    if (seconds % 60 !== 0) {
+        core.warning(`timeout ${seconds}s is not a whole number of minutes, which is all fs-cli accepts; ` +
+            `rounding up to ${minutes} minute(s).`);
+    }
+    return minutes;
+}
+//# sourceMappingURL=timeout.js.map
+
+/***/ }),
+
 /***/ 9026:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -65315,26 +65394,10 @@ async function run() {
         const sbomFormat = (core.getInput('sbom-format') || undefined);
         const waitForCompletion = core.getBooleanInput('wait-for-completion');
         // timeout is optional: unset means fs-cli's own defaults (30 minutes for
-        // the upload, 30 for the scan poll) rather than a bound we invented.
-        const timeoutInput = core.getInput('timeout').trim();
-        // Deliberately strict: parseInt would read "600s" as 600 and "10 minutes"
-        // as 10, quietly applying a bound the caller did not ask for.
-        if (timeoutInput && !/^\d+$/.test(timeoutInput)) {
-            throw new Error(`timeout must be a whole number of seconds, got "${timeoutInput}". ` +
-                `Leave it unset to use fs-cli's own defaults.`);
-        }
-        const timeoutSecs = timeoutInput ? parseInt(timeoutInput, 10) : undefined;
-        if (timeoutSecs !== undefined && timeoutSecs <= 0) {
-            throw new Error(`timeout must be a positive number of seconds, got "${timeoutInput}".`);
-        }
-        const timeoutMinutes = timeoutSecs ? Math.max(1, Math.ceil(timeoutSecs / 60)) : undefined;
-        // fs-cli takes whole minutes, so any timeout that is not an exact multiple
-        // of 60 rounds up — warn with the bound that will actually apply rather
-        // than waiting longer than asked without saying so.
-        if (timeoutSecs !== undefined && timeoutMinutes !== undefined && timeoutSecs % 60 !== 0) {
-            core.warning(`timeout ${timeoutSecs}s is not a whole number of minutes, which is all fs-cli accepts; ` +
-                `rounding up to ${timeoutMinutes} minute(s).`);
-        }
+        // the upload, 30 for the scan poll) rather than a bound we invented. The
+        // parsing, the rejections and the rounding warning live in core so they
+        // stay identical to the wait action's.
+        const timeoutMinutes = (0, core_1.parseTimeoutMinutes)(core.getInput('timeout'));
         if (core.getInput('project-type')) {
             core.warning('project-type is ignored: fs-cli creates the project, and the platform picks the type.');
         }

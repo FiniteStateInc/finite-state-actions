@@ -25,6 +25,8 @@ pnpm -C packages/core run build
 
 CI runs this explicitly before `typecheck` and `test`.
 
+The `test` job is a matrix over `ubuntu-latest`, `macos-latest` and `windows-latest`. `lint`, `typecheck` and `build` stay on ubuntu — they produce identical results anywhere. Windows is the leg worth keeping: every action runs there, and nothing else checks it.
+
 Run a single test file:
 
 ```bash
@@ -55,7 +57,7 @@ cd actions/setup && pnpm build
 
 ### Actions (`actions/*`)
 
-Seven bundled GitHub Actions, each with `action.yml` + `src/main.ts` + `tsconfig.json` + `__tests__/` + committed `dist/`:
+Eight bundled GitHub Actions, each with `action.yml` + `src/main.ts` + `tsconfig.json` + `__tests__/` + committed `dist/`:
 
 | Action          | Purpose                                                                                                                                                                          |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -66,10 +68,11 @@ Seven bundled GitHub Actions, each with `action.yml` + `src/main.ts` + `tsconfig
 | `quality-gate`  | Evaluate findings against gate config, output pass/fail                                                                                                                          |
 | `pr-comment`    | Post/update PR comment with findings summary and gate results                                                                                                                    |
 | `download-sbom` | Export CycloneDX/SPDX SBOM, upload as artifact; takes `api-token`/`domain` when no setup ran                                                                                     |
+| `wait`          | Block until the platform finishes scanning a version, for the `scan` path, which has no `wait-for-completion` of its own                                                         |
 
-Plus two composite actions, neither of which has a `package.json` — pnpm's `actions/*` glob skips them and they need no bundle:
+`actions/wait/` was a bash composite through v2.0 and is now bundled like the rest. The rewrite was about Windows: a composite step declaring `shell: bash` runs under Git Bash there, and on a self-hosted Windows image without Git for Windows the step fails before the script runs, with GitHub's own error rather than one of ours. The Node action runs fs-cli through `@actions/exec` with an argument list and no shell, so one implementation covers ubuntu, macOS and Windows. It also goes through `ensureFsCli` now, like `scan` and `upload`, so it installs fs-cli when no earlier step did instead of failing. Deleted with the shell: `wait.sh`, `__tests__/action.test.sh`, the `wait-action` CI job, and the two bash traps that job existed to cover (an empty array expansion under `set -u` in the bash 3.2 macOS ships, and a leading zero read as octal). The `timeout` parsing those traps guarded now lives in `packages/core/src/timeout.ts` as `parseTimeoutMinutes`, shared with `upload` so the two cannot drift.
 
-`actions/wait/` — waits for the platform to finish scanning a version, for the `scan` path, which has no `wait-for-completion` input of its own. `action.yml` passes every input through the environment and runs `wait.sh`, which shells out to `fs-cli query --type scan --wait --fail-on-scan-incomplete`. It does not install fs-cli; it requires one already on `PATH` from `setup`, `scan` or `upload`. The script is a separate file so `__tests__/action.test.sh` can run it against a stub fs-cli — the `wait-action` CI job invokes that script directly, since `pnpm -r run test` cannot see a package with no `package.json`. That job runs on `ubuntu-latest` and `macos-latest`, and shellchecks both scripts on ubuntu: `pnpm lint` is TypeScript-only and prettier ignores `.sh`, so this job is the whole quality gate for the shell. Two bash traps the script works around, both only reachable on one of those runners: `${POLL_TIMEOUT[@]+"${POLL_TIMEOUT[@]}"}`, because under `set -u` an empty array expansion is an error in bash 3.2, which is what macOS ships; and `$((10#$TIMEOUT))`, because bash reads a leading zero as octal, so an un-normalised `timeout: 0600` would wait 7 minutes and `09` would abort the script with `value too great for base`.
+Plus one composite action, which has no `package.json` — pnpm's `actions/*` glob skips it and it needs no bundle:
 
 `actions/upload-scan/` — a deprecated alias for `upload`, kept for consumers pinned to the old path. It is `action.yml` only: a composite that warns and forwards to `.../actions/upload@v2`. No `package.json`, so pnpm's `actions/*` glob skips it and it needs no bundle. Remove it in v3.
 
@@ -77,11 +80,11 @@ Actions chain via environment variables (set by `setup`) and step outputs (JSON,
 
 ### External CLIs
 
-Three actions shell out via `@actions/exec` rather than the REST API: `scan` and `upload` run `fs-cli` (`upload` uses `upload`/`import`/`third-party` plus `query --type scan` for status, and passes the token via `FS_TOKEN` so it stays out of argv), `run-report` installs and runs `fs-report` through `pipx`. `setup`, `scan`, and `upload` install `fs-cli` via shared core code (`packages/core/src/install-cli.ts`: `installFsCli` always downloads, `ensureFsCli` reuses an fs-cli already on `PATH`): it fetches a pre-signed URL from `GET /cli/download?os=&arch=`, writes the binary under `$RUNNER_TEMP/fs-cli`, and `core.addPath`s it — so `PATH` only carries fs-cli for later steps in the same job. Tests mock `@actions/exec`, `@actions/core`, and `@finite-state/core` with `vi.mock` — no network or subprocess in tests.
+Four actions shell out via `@actions/exec` rather than the REST API: `scan`, `upload` and `wait` run `fs-cli` (`upload` uses `upload`/`import`/`third-party` plus `query --type scan` for status, `wait` only the latter, and both pass the token via `FS_TOKEN` so it stays out of argv), `run-report` installs and runs `fs-report` through `pipx`. `setup`, `scan`, `upload`, and `wait` install `fs-cli` via shared core code (`packages/core/src/install-cli.ts`: `installFsCli` always downloads, `ensureFsCli` reuses an fs-cli already on `PATH`): it fetches a pre-signed URL from `GET /cli/download?os=&arch=`, writes the binary under `$RUNNER_TEMP/fs-cli`, and `core.addPath`s it — so `PATH` only carries fs-cli for later steps in the same job. Tests mock `@actions/exec`, `@actions/core`, and `@finite-state/core` with `vi.mock` — no network or subprocess in tests.
 
 ### Build & Release
 
-- All seven bundled actions declare `using: 'node24'`. Bundles are built by ncc, not transpiled per-runtime, so the runtime lives only in `action.yml`. The two composite actions (`wait`, `upload-scan`) declare `using: 'composite'` and have no bundle.
+- All eight bundled actions declare `using: 'node24'`. Bundles are built by ncc, not transpiled per-runtime, so the runtime lives only in `action.yml`. The one remaining composite action (`upload-scan`) declares `using: 'composite'` and has no bundle.
 - Actions are bundled with `@vercel/ncc` into `dist/index.js`. **These bundles are committed** and CI fails the `build` job if `git diff actions/*/dist/` is non-empty — always run `pnpm build` and commit the bundle with any source change.
 - Root `.gitignore` lists `dist/` and `*.js`. Existing action bundles are already tracked so the rule doesn't affect them, but a **new** action's `dist/` needs `git add -f`.
 - Tagging `v*` runs CI, creates a GitHub Release, and force-moves the major tag (`v2`). Consumers pin `FiniteStateInc/finite-state-actions/actions/<name>@v2`, so a broken committed bundle ships immediately. The current major is `v2`; `v2` is also moved by hand when shipping fixes without a new semver tag.

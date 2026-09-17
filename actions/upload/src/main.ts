@@ -1,7 +1,13 @@
 import * as core from '@actions/core'
 import * as exec from '@actions/exec'
 import { glob } from 'fs/promises'
-import { FsClient, ensureFsCli, readSetupContext, writeSetupContext } from '@finite-state/core'
+import {
+  FsClient,
+  ensureFsCli,
+  parseTimeoutMinutes,
+  readSetupContext,
+  writeSetupContext,
+} from '@finite-state/core'
 import type { SbomFormat } from '@finite-state/core'
 
 // ── Scan-type routing ─────────────────────────────────────────────────────────
@@ -289,30 +295,10 @@ export async function run(): Promise<void> {
     const waitForCompletion = core.getBooleanInput('wait-for-completion')
 
     // timeout is optional: unset means fs-cli's own defaults (30 minutes for
-    // the upload, 30 for the scan poll) rather than a bound we invented.
-    const timeoutInput = core.getInput('timeout').trim()
-    // Deliberately strict: parseInt would read "600s" as 600 and "10 minutes"
-    // as 10, quietly applying a bound the caller did not ask for.
-    if (timeoutInput && !/^\d+$/.test(timeoutInput)) {
-      throw new Error(
-        `timeout must be a whole number of seconds, got "${timeoutInput}". ` +
-          `Leave it unset to use fs-cli's own defaults.`,
-      )
-    }
-    const timeoutSecs = timeoutInput ? parseInt(timeoutInput, 10) : undefined
-    if (timeoutSecs !== undefined && timeoutSecs <= 0) {
-      throw new Error(`timeout must be a positive number of seconds, got "${timeoutInput}".`)
-    }
-    const timeoutMinutes = timeoutSecs ? Math.max(1, Math.ceil(timeoutSecs / 60)) : undefined
-    // fs-cli takes whole minutes, so any timeout that is not an exact multiple
-    // of 60 rounds up — warn with the bound that will actually apply rather
-    // than waiting longer than asked without saying so.
-    if (timeoutSecs !== undefined && timeoutMinutes !== undefined && timeoutSecs % 60 !== 0) {
-      core.warning(
-        `timeout ${timeoutSecs}s is not a whole number of minutes, which is all fs-cli accepts; ` +
-          `rounding up to ${timeoutMinutes} minute(s).`,
-      )
-    }
+    // the upload, 30 for the scan poll) rather than a bound we invented. The
+    // parsing, the rejections and the rounding warning live in core so they
+    // stay identical to the wait action's.
+    const timeoutMinutes = parseTimeoutMinutes(core.getInput('timeout'))
 
     if (core.getInput('project-type')) {
       core.warning(
