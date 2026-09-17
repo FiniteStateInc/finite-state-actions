@@ -21,6 +21,7 @@ vi.mock('@actions/exec', () => ({
 vi.mock('@actions/core', () => ({
   getInput: vi.fn(),
   warning: vi.fn(),
+  error: vi.fn(),
   setFailed: vi.fn(),
   setSecret: vi.fn(),
   info: vi.fn(),
@@ -28,23 +29,23 @@ vi.mock('@actions/core', () => ({
 
 // ── Mock @finite-state/core ────────────────────────────────────────────────────
 //
-// parseTimeoutMinutes and quoteExecPath are the real ones, imported from source
-// rather than from the package's built dist so this suite does not need a core
-// build. parseTimeoutMinutes is the whole of this action's input validation and
-// quoteExecPath decides what exec is actually handed, so stubbing either would
-// leave the rounding, the rejections, and the path assertions below asserting
-// nothing.
+// timeoutSecondsToMinutes and quoteExecPath are the real ones, imported from
+// source rather than from the package's built dist so this suite does not need
+// a core build. timeoutSecondsToMinutes is the whole of this action's input
+// validation and quoteExecPath decides what exec is actually handed, so
+// stubbing either would leave the rounding, the rejections, and the path
+// assertions below asserting nothing.
 
 const mockEnsureFsCli = vi.fn()
 
 vi.mock('@finite-state/core', async () => {
-  const { parseTimeoutMinutes } = await import('../../../packages/core/src/timeout')
+  const { timeoutSecondsToMinutes } = await import('../../../packages/core/src/timeout')
   const { quoteExecPath } = await import('../../../packages/core/src/exec-path')
   return {
     FsClient: vi.fn().mockImplementation(() => ({})),
     ensureFsCli: (...args: unknown[]) => mockEnsureFsCli(...args),
     readSetupContext: vi.fn(),
-    parseTimeoutMinutes,
+    timeoutSecondsToMinutes,
     quoteExecPath,
   }
 })
@@ -53,11 +54,6 @@ vi.mock('@finite-state/core', async () => {
 
 import * as core from '@actions/core'
 import { readSetupContext } from '@finite-state/core'
-// The parser exec() runs its first parameter through. Reached by file path
-// because @actions/exec does not re-export it, and imported deliberately: it is
-// the thing that splits an unquoted path on spaces, so the quoting below is
-// checked against the real implementation rather than an assumption about it.
-import { argStringToArray } from '@actions/exec/lib/toolrunner'
 import { run } from '../src/main'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -73,11 +69,12 @@ function queryCall() {
 }
 
 /**
- * The executable path, and any arguments, exec() would take from the command
- * line this action built.
+ * The quoted command line this action built. `spawn.test.ts` covers the other
+ * half of the property — that a quoted path with a space in it really does
+ * reach a spawned process — by running one.
  */
-function parsedCommandLine() {
-  return argStringToArray(queryCall().binary)
+function commandLine() {
+  return queryCall().binary
 }
 
 /**
@@ -98,6 +95,7 @@ describe('wait action', () => {
     vi.clearAllMocks()
     execCalls.length = 0
     exitCode = 0
+    process.exitCode = undefined
 
     vi.mocked(readSetupContext).mockReturnValue({
       apiToken: 'test-token',
@@ -114,7 +112,7 @@ describe('wait action', () => {
     await run()
 
     const query = queryCall()
-    expect(parsedCommandLine()).toEqual(['/usr/local/bin/fs-cli'])
+    expect(commandLine()).toBe('"/usr/local/bin/fs-cli"')
     expect(query.args).toEqual([
       'query',
       '--type',
@@ -163,7 +161,11 @@ describe('wait action', () => {
     await run()
 
     expect(execCalls).toHaveLength(0)
-    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('No version to wait on'))
+    // The title wait.sh wrote, kept so a log filter keyed on it still matches.
+    expect(core.error).toHaveBeenCalledWith(expect.stringContaining('No version to wait on'), {
+      title: 'No version ID',
+    })
+    expect(process.exitCode).toBe(1)
   })
 
   it('fails with the exit code, version and domain when fs-cli does not settle', async () => {
@@ -171,9 +173,21 @@ describe('wait action', () => {
 
     await run()
 
-    expect(core.setFailed).toHaveBeenCalledWith(
+    expect(core.error).toHaveBeenCalledWith(
       expect.stringContaining('fs-cli query exited 3 for version ver-999 on app.finitestate.io'),
+      { title: 'Scan did not finish' },
     )
+  })
+
+  it('exits with fs-cli\'s own code, as the shell version\'s exit "$QUERY_EXIT" did', async () => {
+    exitCode = 7
+
+    await run()
+
+    // core.setFailed would force 1 and lose the distinction between a failed
+    // scan and a poll timeout.
+    expect(process.exitCode).toBe(7)
+    expect(core.setFailed).not.toHaveBeenCalled()
   })
 
   it('reports a missing token through the context error', async () => {
@@ -184,9 +198,34 @@ describe('wait action', () => {
     await run()
 
     expect(execCalls).toHaveLength(0)
-    expect(core.setFailed).toHaveBeenCalledWith(
+    expect(core.error).toHaveBeenCalledWith(
       expect.stringContaining('FINITE_STATE_AUTH_TOKEN is not set.'),
+      { title: 'No API token' },
     )
+    expect(process.exitCode).toBe(1)
+  })
+
+  it('reads the context before parsing the timeout, so a missing token is reported first', async () => {
+    vi.mocked(readSetupContext).mockImplementation(() => {
+      throw new Error('FINITE_STATE_AUTH_TOKEN is not set.')
+    })
+    setInputs({ timeout: 'not-a-number' })
+
+    await run()
+
+    // Both inputs are wrong. The token is the one to fix first, so it is the
+    // one reported — the ordering wait.sh had.
+    expect(core.error).toHaveBeenCalledWith(expect.any(String), { title: 'No API token' })
+    expect(core.error).not.toHaveBeenCalledWith(expect.any(String), { title: 'Bad timeout' })
+  })
+
+  it('masks the token before anything else can fail and log it', async () => {
+    setInputs({ timeout: 'not-a-number' })
+
+    await run()
+
+    expect(core.setSecret).toHaveBeenCalledWith('test-token')
+    expect(core.error).toHaveBeenCalledWith(expect.any(String), { title: 'Bad timeout' })
   })
 
   // ── timeout ──────────────────────────────────────────────────────────────────
@@ -225,27 +264,47 @@ describe('wait action', () => {
 
     await run()
 
-    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('rounding up to 2 minute(s)'))
+    expect(core.warning).toHaveBeenCalledWith(
+      expect.stringContaining('rounding up to 2 minute(s)'),
+      { title: 'Timeout rounded' },
+    )
   })
 
-  it.each(['600s', '10 minutes', 'abc', '-5', '1.5', '0'])(
-    'rejects the malformed timeout %j',
+  it.each(['600s', '10 minutes', 'abc', '-5', '1.5'])(
+    'rejects the malformed timeout %j as not a whole number',
     async (timeout) => {
       setInputs({ timeout })
 
       await run()
 
       expect(execCalls).toHaveLength(0)
-      expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('timeout must be a'))
+      expect(core.error).toHaveBeenCalledWith(
+        expect.stringContaining('timeout must be a whole number of seconds'),
+        { title: 'Bad timeout' },
+      )
     },
   )
+
+  it('rejects a zero timeout for its value, not as a parse failure', async () => {
+    setInputs({ timeout: '0' })
+
+    await run()
+
+    expect(execCalls).toHaveLength(0)
+    expect(core.error).toHaveBeenCalledWith(
+      expect.stringContaining('timeout must be a positive number of seconds'),
+      { title: 'Bad timeout' },
+    )
+  })
 
   // ── Cross-platform ───────────────────────────────────────────────────────────
   //
   // This suite runs on ubuntu, macOS and Windows in CI. These cases pin the two
   // properties that let one implementation cover all three: the action never
   // goes through a shell, and it runs whatever path ensureFsCli hands back
-  // rather than a bare name it assumes PATH will resolve.
+  // rather than a bare name it assumes PATH will resolve. The Windows-shaped
+  // paths below are strings, so these cases check the action's own handling on
+  // every leg; the Windows leg is what checks Windows itself.
 
   it.each([
     ['D:\\a\\_temp\\fs-cli\\fs-cli.exe', 'a GitHub-hosted Windows RUNNER_TEMP'],
@@ -258,9 +317,10 @@ describe('wait action', () => {
     await run()
 
     // exec() parses its first parameter as a command line even when an args
-    // array is passed, so the one path that matters is the one that survives
-    // that parse: a single argument, byte-for-byte what ensureFsCli returned.
-    expect(parsedCommandLine()).toEqual([fsCli])
+    // array is passed, so the path has to arrive quoted or it splits at the
+    // space. spawn.test.ts runs a real process from a spaced path to prove the
+    // quoting is the kind exec accepts.
+    expect(commandLine()).toBe(`"${fsCli}"`)
   })
 
   it('never invokes a shell: arguments stay a list and no shell option is set', async () => {
@@ -279,5 +339,22 @@ describe('wait action', () => {
     await run()
 
     expect(mockEnsureFsCli).toHaveBeenCalledTimes(1)
+  })
+
+  it('titles an fs-cli that cannot be resolved or downloaded', async () => {
+    mockEnsureFsCli.mockRejectedValue(
+      new Error('fs-cli is not available for this runner (freebsd/x64).'),
+    )
+
+    await run()
+
+    // ensureFsCli rejects rather than throwing, so this also pins that the
+    // titling wrapper awaits what it runs.
+    expect(execCalls).toHaveLength(0)
+    expect(core.error).toHaveBeenCalledWith(
+      expect.stringContaining('fs-cli is not available for this runner'),
+      { title: 'fs-cli not found' },
+    )
+    expect(process.exitCode).toBe(1)
   })
 })

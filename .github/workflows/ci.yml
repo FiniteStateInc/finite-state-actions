@@ -67,10 +67,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      # git status, not git diff: the root .gitignore lists dist/ and *.js, so a
-      # new action's bundle starts out untracked, and git diff reports nothing
-      # for a file git does not track yet. That would ship an action with no
-      # dist/index.js and a green build.
+      # Two checks, because neither alone catches a missing bundle. This one
+      # compares what is on disk against what is committed, and uses git status
+      # rather than git diff because the root .gitignore lists dist/ and *.js:
+      # git diff reports nothing for a file git does not track yet, so a new
+      # action's bundle would look fine while being absent from the release.
       - name: Verify dist/ files are up-to-date and tracked
         run: |
           if [ -n "$(git status --porcelain --ignored=matching actions/*/dist/)" ]; then
@@ -78,3 +79,20 @@ jobs:
             git status --porcelain --ignored=matching actions/*/dist/
             exit 1
           fi
+
+      # And this one names the actions it expects a bundle for, rather than
+      # globbing for whatever exists: actions/*/dist/ contributes no path at all
+      # for an action whose dist/ was never created, so the check above would
+      # pass while that action ships with no entry point.
+      - name: Verify every bundled action has a tracked bundle
+        run: |
+          missing=0
+          for manifest in actions/*/action.yml; do
+            action="$(dirname "$manifest")"
+            grep -q "using: 'node" "$manifest" || continue
+            if ! git ls-files --error-unmatch "$action/dist/index.js" > /dev/null 2>&1; then
+              echo "::error::$action declares a Node runtime but has no tracked $action/dist/index.js. Run 'pnpm build', then 'git add -f $action/dist'."
+              missing=1
+            fi
+          done
+          exit $missing

@@ -73,7 +73,8 @@ const PATH_DIRS = [path.join('/usr', 'local', 'bin'), path.join('/usr', 'bin')]
 const ON_PATH = path.join(PATH_DIRS[0], 'fs-cli')
 // Windows: findOnPath tries '.exe' before a bare name, and installFsCli writes
 // 'fs-cli.exe'. A path with a space in it is the case that made every action
-// quote the binary before handing it to @actions/exec.
+// quote the binary before handing it to @actions/exec (see
+// actions/wait/__tests__/spawn.test.ts, which spawns from one for real).
 // No drive letter: PATH is split on the host's path.delimiter, which is ':' on
 // the ubuntu and macOS legs, and a 'C:' prefix would split with it.
 const WIN_PATH_DIRS = [path.join('/Program Files', 'fs-cli')]
@@ -338,9 +339,11 @@ describe('ensureFsCli', () => {
 
   // ── Windows PATH resolution ─────────────────────────────────────────────────
   //
-  // These stub process.platform rather than relying on the runner, so they
-  // check the win32 branch of findOnPath on every leg of the test matrix
-  // instead of only on the Windows one.
+  // These stub process.platform, so the win32 branch of findOnPath — the '.exe'
+  // probe and the fs-cli.exe install name — is checked on every leg instead of
+  // only the Windows one. What they cannot check anywhere but the Windows leg is
+  // the `path` module itself: path.join and path.delimiter follow the host, so
+  // drive letters and ';'-separated PATH entries are the Windows leg's job.
 
   it('resolves fs-cli.exe on PATH on Windows, where the bare name does not exist', async () => {
     stubPlatform('win32', 'x64')
