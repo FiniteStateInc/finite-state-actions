@@ -4,6 +4,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { constants as fsConstants } from 'node:fs'
 import type { FsClient } from './client'
+import { fetchFailure } from './fetch-error'
 
 // ── Platform mapping ──────────────────────────────────────────────────────────
 
@@ -183,7 +184,13 @@ export async function installFsCli(client: FsClient): Promise<string> {
       `(runner: ${process.platform}/${process.arch})`,
   )
 
-  const response = await fetch(downloadUrl)
+  let response: Response
+  try {
+    response = await fetch(downloadUrl)
+  } catch (err) {
+    // The URL is pre-signed, so name it instead of printing it.
+    throw fetchFailure('the fs-cli download URL', err)
+  }
   if (!response.ok) {
     throw new Error(`Failed to download fs-cli: HTTP ${response.status} from the download URL.`)
   }

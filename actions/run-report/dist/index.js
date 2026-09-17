@@ -115443,6 +115443,7 @@ exports.authUserOrganization = authUserOrganization;
 exports.isProjectId = isProjectId;
 exports.resolveProjectId = resolveProjectId;
 const proxy_1 = __nccwpck_require__(50802);
+const fetch_error_1 = __nccwpck_require__(19941);
 // ── Constants ─────────────────────────────────────────────────────────────────
 const MAX_RETRIES = 6;
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
@@ -115467,7 +115468,13 @@ class FsClient {
         let attempt = 0;
         // eslint-disable-next-line no-constant-condition
         while (true) {
-            const response = await fetch(url, opts);
+            let response;
+            try {
+                response = await fetch(url, opts);
+            }
+            catch (err) {
+                throw (0, fetch_error_1.fetchFailure)(url, err);
+            }
             if (response.ok) {
                 return response.json();
             }
@@ -115826,6 +115833,52 @@ function quoteExecPath(binary) {
     return `"${escaped}"`;
 }
 //# sourceMappingURL=exec-path.js.map
+
+/***/ }),
+
+/***/ 19941:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.fetchFailure = fetchFailure;
+/**
+ * Node's `fetch` reports every network-level failure as `TypeError: fetch
+ * failed` and keeps the real reason — refused connection, DNS miss, a proxy's
+ * TLS rejection, a reset socket — in `cause`. That bare message is all a step
+ * prints, so a customer behind a proxy sees `Error: fetch failed` and nothing
+ * to act on.
+ *
+ * `fetchFailure` walks the `cause` chain (and `AggregateError.errors`, which is
+ * what a connect to a multi-address host produces) and returns an Error naming
+ * the request and every reason code under it.
+ *
+ * `what` is caller-supplied rather than always the URL because the fs-cli
+ * download URL is pre-signed — its query string is a credential and must stay
+ * out of the log.
+ */
+function fetchFailure(what, err) {
+    const reasons = reasonChain(err);
+    const detail = reasons.length ? reasons.join(': ') : String(err);
+    return new Error(`Request to ${what} failed: ${detail}`, { cause: err });
+}
+const MAX_DEPTH = 5;
+function reasonChain(err, depth = 0) {
+    if (err == null || depth >= MAX_DEPTH) {
+        return [];
+    }
+    if (!(err instanceof Error)) {
+        return [String(err)];
+    }
+    const code = err.code;
+    const label = code ? `${err.message} (${String(code)})` : err.message;
+    const nested = err instanceof AggregateError && err.errors?.length
+        ? err.errors.flatMap((inner) => reasonChain(inner, depth + 1))
+        : reasonChain(err.cause, depth + 1);
+    return [label, ...nested];
+}
+//# sourceMappingURL=fetch-error.js.map
 
 /***/ }),
 
@@ -116190,6 +116243,7 @@ __exportStar(__nccwpck_require__(99754), exports);
 __exportStar(__nccwpck_require__(19235), exports);
 __exportStar(__nccwpck_require__(94893), exports);
 __exportStar(__nccwpck_require__(48993), exports);
+__exportStar(__nccwpck_require__(19941), exports);
 //# sourceMappingURL=index.js.map
 
 /***/ }),
@@ -116240,6 +116294,7 @@ const fs = __importStar(__nccwpck_require__(51455));
 const os = __importStar(__nccwpck_require__(48161));
 const path = __importStar(__nccwpck_require__(76760));
 const node_fs_1 = __nccwpck_require__(73024);
+const fetch_error_1 = __nccwpck_require__(19941);
 // ── Platform mapping ──────────────────────────────────────────────────────────
 const OS_NAMES = {
     linux: 'linux',
@@ -116378,7 +116433,14 @@ async function installFsCli(client) {
     }
     core.info(`Requesting fs-cli ${version ?? 'latest'} for ${osName}/${archName} ` +
         `(runner: ${process.platform}/${process.arch})`);
-    const response = await fetch(downloadUrl);
+    let response;
+    try {
+        response = await fetch(downloadUrl);
+    }
+    catch (err) {
+        // The URL is pre-signed, so name it instead of printing it.
+        throw (0, fetch_error_1.fetchFailure)('the fs-cli download URL', err);
+    }
     if (!response.ok) {
         throw new Error(`Failed to download fs-cli: HTTP ${response.status} from the download URL.`);
     }

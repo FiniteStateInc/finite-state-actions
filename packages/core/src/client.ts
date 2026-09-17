@@ -1,4 +1,5 @@
 import { useEnvProxy } from './proxy'
+import { fetchFailure } from './fetch-error'
 import type {
   AuthUser,
   CreateProjectOptions,
@@ -66,7 +67,12 @@ export class FsClient {
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      const response = await fetch(url, opts)
+      let response: Response
+      try {
+        response = await fetch(url, opts)
+      } catch (err) {
+        throw fetchFailure(url, err)
+      }
 
       if (response.ok) {
         return response.json() as Promise<T>
