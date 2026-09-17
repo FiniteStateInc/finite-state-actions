@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import * as path from 'node:path'
 
 // ── Mock @actions/core ─────────────────────────────────────────────────────────
 
@@ -62,6 +63,15 @@ function pe(machine = 0x8664): Uint8Array {
 
 const BINARY = elf()
 
+// The code under test builds paths with `path.join` and splits PATH on
+// `path.delimiter`, so the fixtures have to be built the same way — hard-coded
+// POSIX separators fail on the Windows leg of the test matrix.
+const RUNNER_TEMP = path.join('/runner', 'temp')
+const INSTALL_DIR = path.join(RUNNER_TEMP, 'fs-cli')
+const INSTALLED = path.join(INSTALL_DIR, 'fs-cli')
+const PATH_DIRS = [path.join('/usr', 'local', 'bin'), path.join('/usr', 'bin')]
+const ON_PATH = path.join(PATH_DIRS[0], 'fs-cli')
+
 function makeClient(downloadUrl = 'https://cdn.example.com/fs-cli?sig=abc', version = 'v2.3.30') {
   return {
     getCliDownloadUrl: vi.fn().mockResolvedValue({ download_url: downloadUrl, version }),
@@ -102,7 +112,7 @@ function stubPlatform(platform: string, arch: string) {
 describe('installFsCli', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    process.env.RUNNER_TEMP = '/runner/temp'
+    process.env.RUNNER_TEMP = RUNNER_TEMP
     serve(BINARY)
   })
 
@@ -120,11 +130,11 @@ describe('installFsCli', () => {
 
     expect(client.getCliDownloadUrl).toHaveBeenCalledWith('linux', 'amd64')
     expect(fetch).toHaveBeenCalledWith('https://cdn.example.com/fs-cli?sig=abc')
-    expect(mockMkdir).toHaveBeenCalledWith('/runner/temp/fs-cli', { recursive: true })
-    expect(mockWriteFile).toHaveBeenCalledWith('/runner/temp/fs-cli/fs-cli', expect.anything())
-    expect(mockChmod).toHaveBeenCalledWith('/runner/temp/fs-cli/fs-cli', 0o755)
-    expect(core.addPath).toHaveBeenCalledWith('/runner/temp/fs-cli')
-    expect(binary).toBe('/runner/temp/fs-cli/fs-cli')
+    expect(mockMkdir).toHaveBeenCalledWith(INSTALL_DIR, { recursive: true })
+    expect(mockWriteFile).toHaveBeenCalledWith(INSTALLED, expect.anything())
+    expect(mockChmod).toHaveBeenCalledWith(INSTALLED, 0o755)
+    expect(core.addPath).toHaveBeenCalledWith(INSTALL_DIR)
+    expect(binary).toBe(INSTALLED)
   })
 
   it('maps darwin/arm64 runners to the platform naming', async () => {
@@ -250,8 +260,8 @@ describe('installFsCli', () => {
 describe('ensureFsCli', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    process.env.RUNNER_TEMP = '/runner/temp'
-    process.env.PATH = '/usr/local/bin:/usr/bin'
+    process.env.RUNNER_TEMP = RUNNER_TEMP
+    process.env.PATH = PATH_DIRS.join(path.delimiter)
     serve(BINARY)
   })
 
@@ -264,14 +274,14 @@ describe('ensureFsCli', () => {
   it('reuses an fs-cli already on PATH when it matches the runner', async () => {
     stubPlatform('linux', 'x64')
     mockAccess.mockImplementation(async (candidate: string) => {
-      if (candidate !== '/usr/local/bin/fs-cli') throw new Error('ENOENT')
+      if (candidate !== ON_PATH) throw new Error('ENOENT')
     })
     onDisk(elf())
     const client = makeClient()
 
     const binary = await ensureFsCli(client)
 
-    expect(binary).toBe('/usr/local/bin/fs-cli')
+    expect(binary).toBe(ON_PATH)
     expect(client.getCliDownloadUrl).not.toHaveBeenCalled()
     expect(fetch).not.toHaveBeenCalled()
   })
@@ -279,7 +289,7 @@ describe('ensureFsCli', () => {
   it('replaces an fs-cli on PATH that was built for another platform', async () => {
     stubPlatform('linux', 'x64')
     mockAccess.mockImplementation(async (candidate: string) => {
-      if (candidate !== '/usr/local/bin/fs-cli') throw new Error('ENOENT')
+      if (candidate !== ON_PATH) throw new Error('ENOENT')
     })
     onDisk(pe())
     const client = makeClient()
@@ -290,13 +300,13 @@ describe('ensureFsCli', () => {
       expect.stringContaining('Ignoring the fs-cli on PATH'),
     )
     expect(client.getCliDownloadUrl).toHaveBeenCalledWith('linux', 'amd64')
-    expect(binary).toBe('/runner/temp/fs-cli/fs-cli')
+    expect(binary).toBe(INSTALLED)
   })
 
   it('downloads when an fs-cli on PATH cannot be read', async () => {
     stubPlatform('linux', 'x64')
     mockAccess.mockImplementation(async (candidate: string) => {
-      if (candidate !== '/usr/local/bin/fs-cli') throw new Error('ENOENT')
+      if (candidate !== ON_PATH) throw new Error('ENOENT')
     })
     mockOpen.mockRejectedValue(new Error('EACCES'))
     const client = makeClient()
@@ -304,7 +314,7 @@ describe('ensureFsCli', () => {
     const binary = await ensureFsCli(client)
 
     expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('could not be read'))
-    expect(binary).toBe('/runner/temp/fs-cli/fs-cli')
+    expect(binary).toBe(INSTALLED)
   })
 
   it('downloads fs-cli when PATH has none', async () => {
@@ -315,6 +325,6 @@ describe('ensureFsCli', () => {
     const binary = await ensureFsCli(client)
 
     expect(client.getCliDownloadUrl).toHaveBeenCalledWith('linux', 'amd64')
-    expect(binary).toBe('/runner/temp/fs-cli/fs-cli')
+    expect(binary).toBe(INSTALLED)
   })
 })
