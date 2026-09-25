@@ -63837,12 +63837,6 @@ class FsClient {
         return scans[0];
     }
     /**
-     * GET /sboms/{format}/{pvId}?includeVex={bool}
-     */
-    downloadSbom(pvId, format, includeVex) {
-        return this.get(`/sboms/${encodeURIComponent(format)}/${encodeURIComponent(pvId)}?includeVex=${includeVex}`);
-    }
-    /**
      * Polls getScanStatus until the scan reaches COMPLETED or FAILED, or until
      * timeoutMs elapses.
      */
@@ -64461,6 +64455,7 @@ __exportStar(__nccwpck_require__(9754), exports);
 __exportStar(__nccwpck_require__(9235), exports);
 __exportStar(__nccwpck_require__(4893), exports);
 __exportStar(__nccwpck_require__(8993), exports);
+__exportStar(__nccwpck_require__(9425), exports);
 __exportStar(__nccwpck_require__(9941), exports);
 //# sourceMappingURL=index.js.map
 
@@ -65165,6 +65160,46 @@ function parseReportDirectory(reportDir) {
 
 /***/ }),
 
+/***/ 9425:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.normalizeSbomFormat = normalizeSbomFormat;
+/**
+ * SBOM formats fs-cli accepts, keyed by every spelling the actions document.
+ *
+ * Shared by `upload` (`sbom-format`) and `download-sbom` (`format`) so the two
+ * cannot drift: a value one action accepts must not be an opaque fs-cli error in
+ * the other.
+ *
+ * A `Map`, not an object literal: a plain object inherits `constructor` and
+ * `__proto__`, so those two inputs would resolve to a truthy non-string and be
+ * returned as if they were valid formats.
+ */
+const SBOM_FORMATS = new Map([
+    ['cdx', 'cyclonedx'],
+    ['cyclonedx', 'cyclonedx'],
+    ['spdx', 'spdx'],
+]);
+/**
+ * Normalises an SBOM format input to the token fs-cli's `--format` expects,
+ * throwing a named error rather than letting a typo surface as a non-zero
+ * fs-cli exit. Case and surrounding whitespace are not the caller's problem.
+ */
+function normalizeSbomFormat(input, inputName = 'format', hint) {
+    const format = SBOM_FORMATS.get(input.trim().toLowerCase());
+    if (!format) {
+        throw new Error(`${inputName} "${input}" is not recognized. Valid: cdx (cyclonedx) or spdx.` +
+            (hint ? ` ${hint}` : ''));
+    }
+    return format;
+}
+//# sourceMappingURL=sbom-format.js.map
+
+/***/ }),
+
 /***/ 4893:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -65265,26 +65300,23 @@ const core_1 = __nccwpck_require__(2950);
 // ── Scan-type routing ─────────────────────────────────────────────────────────
 /** Types fs-cli's `upload` subcommand handles, in its own naming. */
 const BINARY_TYPES = new Set(['sca', 'sast', 'config', 'vulnerability_analysis']);
-/** SBOM formats fs-cli accepts, keyed by the aliases this action documents. */
-const SBOM_FORMATS = {
-    cdx: 'cyclonedx',
-    cyclonedx: 'cyclonedx',
-    spdx: 'spdx',
-};
 /**
  * Maps the `sbom-format` input to fs-cli's `--format`, or to nothing at all when
  * it was not set — fs-cli then detects the format from the file's contents.
+ *
+ * The alias map and its error live in core, shared with `download-sbom` so a
+ * spelling one action accepts cannot be an opaque fs-cli error in the other.
+ * The parameter is a plain string: casting the raw input to `SbomFormat` would
+ * have the type claim a validation that only happens here, at runtime.
  */
 function sbomFormatArgs(sbomFormat) {
     if (!sbomFormat) {
         return [];
     }
-    const format = SBOM_FORMATS[sbomFormat.trim().toLowerCase()];
-    if (!format) {
-        throw new Error(`sbom-format "${sbomFormat}" is not recognized. Valid: cdx (cyclonedx) or spdx. ` +
-            `Leave it unset to let fs-cli detect the format.`);
-    }
-    return ['--format', format];
+    return [
+        '--format',
+        (0, core_1.normalizeSbomFormat)(sbomFormat, 'sbom-format', 'Leave it unset to let fs-cli detect the format.'),
+    ];
 }
 /** Our inputs use hyphens; fs-cli uses underscores. */
 function normalizeType(type) {
@@ -65484,7 +65516,7 @@ async function run() {
         const versionName = core.getInput('version') || undefined;
         const versionIdInput = core.getInput('version-id') || undefined;
         const scannerType = core.getInput('scanner-type') || undefined;
-        const sbomFormat = (core.getInput('sbom-format') || undefined);
+        const sbomFormat = core.getInput('sbom-format') || undefined;
         const waitForCompletion = core.getBooleanInput('wait-for-completion');
         // timeout is optional: unset means fs-cli's own defaults (30 minutes for
         // the upload, 30 for the scan poll) rather than a bound we invented. The

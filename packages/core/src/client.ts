@@ -240,15 +240,6 @@ export class FsClient {
   }
 
   /**
-   * GET /sboms/{format}/{pvId}?includeVex={bool}
-   */
-  downloadSbom(pvId: string, format: SbomFormat, includeVex: boolean): Promise<object> {
-    return this.get<object>(
-      `/sboms/${encodeURIComponent(format)}/${encodeURIComponent(pvId)}?includeVex=${includeVex}`,
-    )
-  }
-
-  /**
    * Polls getScanStatus until the scan reaches COMPLETED or FAILED, or until
    * timeoutMs elapses.
    */

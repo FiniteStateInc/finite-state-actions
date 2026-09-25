@@ -4,17 +4,17 @@ A collection of GitHub Actions for integrating [Finite State](https://finitestat
 
 ## Actions
 
-| Action                                   | Description                                                                      |
-| ---------------------------------------- | -------------------------------------------------------------------------------- |
-| [setup](./actions/setup)                 | Authenticate with the Finite State platform, configure env, install fs-cli       |
-| [scan](./actions/scan)                   | Scan project dependencies with fs-cli and upload results (runs standalone)       |
-| [upload](./actions/upload)               | Upload a firmware, SBOM, or third-party scan file through fs-cli (standalone)    |
-| [upload-scan](./actions/upload-scan)     | Deprecated alias for `upload`; forwards inputs and outputs, warns, removed in v3 |
-| [wait](./actions/wait)                   | Wait for the platform to finish scanning a version                               |
-| [run-report](./actions/run-report)       | Generate security reports using fs-report                                        |
-| [quality-gate](./actions/quality-gate)   | Fail the build if findings exceed configurable thresholds                        |
-| [pr-comment](./actions/pr-comment)       | Post a findings summary as a pull request comment                                |
-| [download-sbom](./actions/download-sbom) | Download the SBOM for a project version                                          |
+| Action                                   | Description                                                                        |
+| ---------------------------------------- | ---------------------------------------------------------------------------------- |
+| [setup](./actions/setup)                 | Authenticate with the Finite State platform, configure env, install fs-cli         |
+| [scan](./actions/scan)                   | Scan project dependencies with fs-cli and upload results (runs standalone)         |
+| [upload](./actions/upload)               | Upload a firmware, SBOM, or third-party scan file through fs-cli (standalone)      |
+| [upload-scan](./actions/upload-scan)     | Deprecated alias for `upload`; forwards inputs and outputs, warns, removed in v3   |
+| [wait](./actions/wait)                   | Wait for the platform to finish scanning a version                                 |
+| [run-report](./actions/run-report)       | Generate security reports using fs-report                                          |
+| [quality-gate](./actions/quality-gate)   | Fail the build if findings exceed configurable thresholds                          |
+| [pr-comment](./actions/pr-comment)       | Post a findings summary as a pull request comment                                  |
+| [download-sbom](./actions/download-sbom) | Export a version's CycloneDX/SPDX SBOM via fs-cli, upload as artifact (standalone) |
 
 ## Quick Start
 
@@ -220,9 +220,41 @@ jobs:
           artifact-name: 'sbom-${{ github.ref_name }}'
 ```
 
-`download-sbom` needs a version ID. `scan` and `upload` both output one and export it as
-`FINITE_STATE_VERSION_ID`, so a `scan` or `upload` earlier in the job covers it. Otherwise
-pass `version-id` to `setup` or to `download-sbom` yourself.
+`download-sbom` needs a project version to export, identified either by ID or by label.
+`scan` and `upload` both output a version ID and export it as `FINITE_STATE_VERSION_ID`, so
+a `scan` or `upload` earlier in the job covers it. Otherwise pass `version-id` to `setup` or
+to `download-sbom` yourself, or pass a project (`project-id` or `project-name`) with
+`version` and let `fs-cli` resolve the label:
+
+```yaml
+- uses: FiniteStateInc/finite-state-actions/actions/download-sbom@v2
+  with:
+    api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
+    project-name: my-app
+    version: v1.2.3
+```
+
+An explicit input wins over inherited context: a `version-id` you pass is the most specific
+locator, and a `version` label you pass beats a `FINITE_STATE_VERSION_ID` left by an
+upstream `scan` or `upload`. The inherited ID applies only when you pass neither, which is
+what lets `download-sbom` follow a `scan` with no inputs at all.
+
+A project input is the one exception, because `project-id`/`project-name` cannot identify a
+version on their own. Pass one without `version` while an upstream step has exported a
+version ID and the export uses that ID — which may belong to a different project — and the
+step warns that the project input was ignored. Pass `version` alongside it to export by
+label. Every branch that drops an input you set says so in the log.
+
+`download-sbom` runs `fs-cli export` rather than calling the REST API directly, so from v2
+it needs `fs-cli`: it reuses one an earlier Finite State step put on `PATH`, and otherwise
+downloads it from `GET /cli/download`. A job where `download-sbom` is the only Finite State
+step therefore needs egress to that endpoint as well as to the API.
+
+If your runner allows the API but blocks the binary download, put `fs-cli` on `PATH`
+yourself before this step — but it has to be a real fs-cli built for that runner's OS and
+architecture. The actions read the executable header of whatever they find on `PATH` and
+download a replacement when it does not match, so a wrapper script, a shim, or a build for
+another platform still reaches `GET /cli/download` and still fails there.
 
 ### Wait for the scan before exporting
 
@@ -327,7 +359,7 @@ Any fs-report flag without a dedicated input — `--min-severity`, `--scan-type`
 
 Actions pass data via step outputs and environment variables. The `setup` action exports `FINITE_STATE_AUTH_TOKEN` and `FINITE_STATE_DOMAIN` as environment variables for the entire job.
 
-`setup` is optional for `scan`, `upload` and `download-sbom`, which accept `api-token`/`domain` directly (`scan` and `upload` also take `project-name`) and install `fs-cli` when it is not already on `PATH`. Every other action requires `setup`.
+`setup` is optional for `scan`, `upload` and `download-sbom`, which accept `api-token`/`domain`/`project-id`/`project-name` directly and install `fs-cli` when it is not already on `PATH`. Every other action requires `setup`.
 
 `scan` and `upload` also export that context themselves, so a later step inherits the token and domain without repeating them — the same environment variables `setup` writes. Both read the project and version IDs back from fs-cli's output and export those too, as `FINITE_STATE_PROJECT_ID` and `FINITE_STATE_VERSION_ID` plus matching step outputs. That is what lets `download-sbom` follow a `scan` with no inputs of its own.
 

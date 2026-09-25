@@ -12,12 +12,27 @@ inputs:
     description: 'Finite State platform domain. Defaults to the setup context, then app.finitestate.io.'
     required: false
   version-id:
-    description: 'Version ID override (falls back to setup context)'
+    description: 'Version ID override (falls back to setup context). Skips the name lookups and outranks project-name/version.'
+    required: false
+  project-id:
+    description: 'Platform project ID (a UUID), used with version when no version-id is known. Skips the name lookup and outranks project-name. Falls back to the setup context.'
+    required: false
+  project-name:
+    description: 'Project name, resolved by fs-cli. Used with version when no version-id is known. Falls back to the setup context.'
+    required: false
+  version:
+    description: 'Version label, resolved by fs-cli against the version name or number. Requires project-id or project-name (or a setup context carrying the project). Beats a version ID inherited from an upstream scan or upload; only an explicit version-id input takes precedence.'
     required: false
   format:
-    description: 'SBOM format: cyclonedx or spdx'
+    description: 'SBOM format: cyclonedx (alias cdx) or spdx. Case-insensitive; an unrecognized value fails the step rather than reaching fs-cli.'
     required: false
     default: 'cyclonedx'
+  max-size:
+    description: 'Reject an SBOM larger than this many MiB. Unset uses fs-cli default of 64. Raise it for a version whose SBOM exceeds that, which the REST path this replaced did not limit.'
+    required: false
+  timeout:
+    description: 'Optional maximum wait in seconds for the export, rounded up to whole minutes for fs-cli. Unset leaves fs-cli its own 15-minute default.'
+    required: false
   include-vex:
     description: 'Include VEX data in the SBOM export'
     required: false
@@ -40,7 +55,7 @@ outputs:
   artifact-name:
     description: 'Artifact name — set even when upload-artifact is false'
   component-count:
-    description: 'Number of components in the SBOM'
+    description: 'Number of entries in the SBOM — components for cyclonedx, packages for spdx, chosen by the format input with no fallback to the other. Not comparable across formats: SPDX usually counts the describing package too, CycloneDX omits metadata.component and nested components. 0 with a warning when the file cannot be read or parsed, or carries no array for the requested format.'
 runs:
   using: 'node24'
   main: 'dist/index.js'

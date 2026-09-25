@@ -288,37 +288,6 @@ describe('getScanStatus', () => {
   })
 })
 
-// ── downloadSbom ──────────────────────────────────────────────────────────────
-
-describe('downloadSbom', () => {
-  afterEach(() => vi.restoreAllMocks())
-
-  it('calls GET /sboms/{format}/{pvId}?includeVex={bool}', async () => {
-    const sbomData = { bomFormat: 'CycloneDX', components: [] }
-    const mockFetch = makeFetch(sbomData)
-    vi.stubGlobal('fetch', mockFetch)
-
-    const client = new FsClient({ apiToken: 'tok', domain: 'example.com' })
-    const result = await client.downloadSbom('pv1', 'cyclonedx', true)
-
-    const [url, opts] = mockFetch.mock.calls[0]
-    expect(url).toBe('https://example.com/api/public/v0/sboms/cyclonedx/pv1?includeVex=true')
-    expect(opts.method).toBe('GET')
-    expect(result).toEqual(sbomData)
-  })
-
-  it('passes includeVex=false correctly', async () => {
-    const mockFetch = makeFetch({})
-    vi.stubGlobal('fetch', mockFetch)
-
-    const client = new FsClient({ apiToken: 'tok', domain: 'example.com' })
-    await client.downloadSbom('pv2', 'spdx', false)
-
-    const [url] = mockFetch.mock.calls[0]
-    expect(url).toContain('includeVex=false')
-  })
-})
-
 // ── Error handling ────────────────────────────────────────────────────────────
 
 describe('error handling', () => {

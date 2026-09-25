@@ -63,6 +63,7 @@ const mockEnsureFsCli = vi.fn()
 vi.mock('@finite-state/core', async () => {
   const { timeoutSecondsToMinutes } = await import('../../../packages/core/src/timeout')
   const { quoteExecPath } = await import('../../../packages/core/src/exec-path')
+  const { normalizeSbomFormat } = await import('../../../packages/core/src/sbom-format')
   return {
     FsClient: vi.fn().mockImplementation(() => ({})),
     ensureFsCli: (...args: unknown[]) => mockEnsureFsCli(...args),
@@ -70,6 +71,7 @@ vi.mock('@finite-state/core', async () => {
     writeSetupContext: vi.fn(),
     timeoutSecondsToMinutes,
     quoteExecPath,
+    normalizeSbomFormat,
   }
 })
 
