@@ -256,6 +256,58 @@ describe('download-sbom action', () => {
     expect(args).not.toContain('ver-456')
   })
 
+  // The --project-id branch used to be reachable only from inherited env, so a
+  // setup-less job that knew its project UUID had no way to pass it.
+  it('accepts an explicit project-id and prefers it over project-name', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        'project-id': 'proj-explicit',
+        'project-name': 'other-app',
+        version: '1.2.3',
+        'output-file': 'sbom.json',
+      }
+      return inputs[name] ?? ''
+    })
+    vi.mocked(readSetupContext).mockReturnValue({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      versionId: undefined,
+    })
+
+    await run()
+
+    const args = fsCliArgs()
+    expect(args).toEqual(expect.arrayContaining(['--project-id', 'proj-explicit']))
+    expect(args).not.toContain('--name')
+  })
+
+  // A project input cannot locate a version by itself. Falling back to the
+  // inherited ID is reasonable, but that ID may belong to another project, so
+  // dropping the input silently is not.
+  it('warns when a project input is dropped in favour of an inherited version ID', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        'project-name': 'my-app',
+        'output-file': 'sbom.json',
+      }
+      return inputs[name] ?? ''
+    })
+    vi.mocked(readSetupContext).mockReturnValue({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      projectName: 'my-app',
+      versionId: 'ver-456',
+    })
+
+    await run()
+
+    expect(core.warning).toHaveBeenCalledWith(
+      expect.stringContaining('without version'),
+      expect.objectContaining({ title: 'Project input ignored' }),
+    )
+    expect(fsCliArgs()).toEqual(expect.arrayContaining(['--version-id', 'ver-456']))
+  })
+
   // The label must not fall through to the inherited ID when no project can be
   // built for it: that would export the upstream scan's version while the
   // workflow asked for a label, which is the override this precedence prevents.

@@ -14,6 +14,9 @@ inputs:
   version-id:
     description: 'Version ID override (falls back to setup context). Skips the name lookups and outranks project-name/version.'
     required: false
+  project-id:
+    description: 'Project UUID, used with version when no version-id is known. Skips the name lookup and outranks project-name. Falls back to the setup context.'
+    required: false
   project-name:
     description: 'Project name, resolved by fs-cli. Used with version when no version-id is known. Falls back to the setup context.'
     required: false

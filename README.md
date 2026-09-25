@@ -347,7 +347,7 @@ Any fs-report flag without a dedicated input — `--min-severity`, `--scan-type`
 
 Actions pass data via step outputs and environment variables. The `setup` action exports `FINITE_STATE_AUTH_TOKEN` and `FINITE_STATE_DOMAIN` as environment variables for the entire job.
 
-`setup` is optional for `scan`, `upload` and `download-sbom`, which accept `api-token`/`domain`/`project-name` directly and install `fs-cli` when it is not already on `PATH`. Every other action requires `setup`.
+`setup` is optional for `scan`, `upload` and `download-sbom`, which accept `api-token`/`domain`/`project-id`/`project-name` directly and install `fs-cli` when it is not already on `PATH`. Every other action requires `setup`.
 
 `scan` and `upload` also export that context themselves, so a later step inherits the token and domain without repeating them — the same environment variables `setup` writes. Both read the project and version IDs back from fs-cli's output and export those too, as `FINITE_STATE_PROJECT_ID` and `FINITE_STATE_VERSION_ID` plus matching step outputs. That is what lets `download-sbom` follow a `scan` with no inputs of its own.
 

@@ -117077,6 +117077,7 @@ async function run() {
     try {
         // ── Read inputs ──────────────────────────────────────────────────────────
         const versionIdInput = core.getInput('version-id') || undefined;
+        const projectIdInput = core.getInput('project-id') || undefined;
         const projectNameInput = core.getInput('project-name') || undefined;
         const version = core.getInput('version') || undefined;
         const format = (core.getInput('format') || 'cyclonedx');
@@ -117102,15 +117103,19 @@ async function run() {
         // resolves itself. A version ID skips both lookups, so prefer it when an
         // upstream scan or upload exported one.
         //
-        // An explicit project-name input wins over an inherited project ID: the two
-        // can name different projects, and sending both would leave fs-cli to pick.
-        const project = projectNameInput
-            ? ['--name', projectNameInput]
-            : ctx.projectId
-                ? ['--project-id', ctx.projectId]
-                : ctx.projectName
-                    ? ['--name', ctx.projectName]
-                    : [];
+        // Either explicit project input wins over inherited context: the two can
+        // name different projects, and sending both would leave fs-cli to pick. An
+        // explicit project-id outranks an explicit project-name because a UUID
+        // cannot be ambiguous, whereas a name can match several projects.
+        const project = projectIdInput
+            ? ['--project-id', projectIdInput]
+            : projectNameInput
+                ? ['--name', projectNameInput]
+                : ctx.projectId
+                    ? ['--project-id', ctx.projectId]
+                    : ctx.projectName
+                        ? ['--name', ctx.projectName]
+                        : [];
         // Explicit inputs beat inherited context, the same rule the project
         // resolution above follows. An explicit version-id is the most specific
         // locator there is; failing that, a version label typed into this step is
@@ -117134,6 +117139,16 @@ async function run() {
             locator.push(...project, '--version', version);
         }
         else if (ctx.versionId) {
+            // A project input with no version to go with it cannot form a label
+            // locator, so the inherited version ID is used instead — but that ID
+            // carries its own project, which may not be the one just named. Say so
+            // rather than dropping the input silently.
+            if (projectIdInput || projectNameInput) {
+                core.warning(`${projectIdInput ? 'project-id' : 'project-name'} was given without version, so it ` +
+                    `cannot locate a version on its own. Exporting the inherited version ID ` +
+                    `${ctx.versionId} instead, which may belong to a different project. Pass version to ` +
+                    `export by label, or version-id to be explicit.`, { title: 'Project input ignored' });
+            }
             locator.push('--version-id', ctx.versionId);
         }
         else {
