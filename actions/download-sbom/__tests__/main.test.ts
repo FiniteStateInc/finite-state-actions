@@ -49,10 +49,13 @@ vi.mock('@finite-state/core', async () => {
   // does: format validation is the behaviour under test in the format cases, so
   // a stub would assert nothing and could drift from core.
   const { normalizeSbomFormat } = await import('../../../packages/core/src/sbom-format')
+  // quoteExecPath comes from source too: a stubbed quoting rule would assert
+  // nothing about the Windows path splitting it exists to prevent.
+  const { quoteExecPath } = await import('../../../packages/core/src/exec-path')
   return {
     FsClient: vi.fn().mockImplementation(() => ({})),
     ensureFsCli: vi.fn(async () => '/tmp/fs-cli/fs-cli'),
-    quoteExecPath: (p: string) => `"${p}"`,
+    quoteExecPath,
     readSetupContext: vi.fn(),
     normalizeSbomFormat,
   }
@@ -278,6 +281,22 @@ describe('download-sbom action', () => {
 
     expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('wrote no file'))
     expect(mockUploadArtifact).not.toHaveBeenCalled()
+  })
+
+  // A zero-byte file clears existsSync, so without its own check it would land
+  // in the parse-warning path and publish component-count: 0 — the same "clean
+  // SBOM" false positive the missing-file check closes, one case over.
+  it.each([
+    ['zero-byte', ''],
+    ['whitespace-only', '  \n\t '],
+  ])('fails when fs-cli exits 0 but wrote a %s file', async (_label, contents) => {
+    mockReadFileSync.mockReturnValue(contents)
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('empty file'))
+    expect(mockUploadArtifact).not.toHaveBeenCalled()
+    expect(core.setOutput).not.toHaveBeenCalledWith('component-count', '0')
   })
 
   // Counting must not stop at an empty `components` when `packages` is

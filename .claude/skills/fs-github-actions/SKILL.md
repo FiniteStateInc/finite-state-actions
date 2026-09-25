@@ -554,7 +554,7 @@ Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
 **Inputs:**
 
 | Input             | Required | Default             | Description                                                                                                   |
-| ----------------- | -------- | ------------------- | ------------------------------------------------------------------------------------------------------------- | --- | ------------- | --- | ------ | ------------------------------- |
+| ----------------- | -------- | ------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `api-token`       | no       | from setup          | FS API token. Required only when `setup`/`scan`/`upload` did not run                                          |
 | `domain`          | no       | from setup          | Platform domain. Falls back to setup context, then `app.finitestate.io`                                       |
 | `version-id`      | no       | from setup/upload   | Falls back to setup context or upload output. Skips the name lookups; outranks `project-name`/`version`       |
@@ -562,7 +562,8 @@ Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
 | `project-name`    | no       | from setup          | Project name, resolved by fs-cli. Used with `version` when no ID is known                                     |
 | `version`         | no       | —                   | Version label, resolved by fs-cli. Needs a project (input or inherited). Beats an _inherited_ version ID      |
 | `format`          | no       | `cyclonedx`         | `cyclonedx` (alias `cdx`) or `spdx`, case-insensitive. An unrecognized value fails the step                   |
-| `max-size`        | no       | fs-cli's 64 (MiB)   | Reject an SBOM larger than this many MiB. Raise it for a version whose SBOM exceeds 64 MiB                    |     | `include-vex` | no  | `true` | Include VEX triage data in SBOM |
+| `max-size`        | no       | fs-cli's 64 (MiB)   | Reject an SBOM larger than this many MiB. Raise it for a version whose SBOM exceeds 64 MiB                    |
+| `include-vex`     | no       | `true`              | Include VEX triage data in SBOM                                                                               |
 | `output-file`     | no       | `sbom.json`         | Output file path                                                                                              |
 | `upload-artifact` | no       | `true`              | Upload as workflow artifact                                                                                   |
 | `artifact-name`   | no       | `finite-state-sbom` | Artifact name                                                                                                 |
@@ -592,7 +593,7 @@ Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
 - **`version-id` is a platform version ID, not a version label.** `v1.2.3` will not work; the ID is what `upload` returns as its `version-id` output. To export by label instead, pass `project-name` and `version` and let fs-cli resolve them — `version` is matched against the platform's version _name_ or _number_, the same as `query`.
 - **Explicit inputs beat inherited context.** A `version-id` input is the most specific locator; a `version` label you pass beats a `FINITE_STATE_VERSION_ID` exported by an upstream `scan` or `upload`. The inherited ID is used only when you pass neither, which is what makes `scan` → `download-sbom` work with no inputs.
 - **A very large SBOM needs `max-size` raised.** fs-cli rejects a response over 64 MiB by default, which the REST path this replaced did not do, so a version whose SBOM is bigger fails until you raise `max-size`. The number is in MiB.
-- **`download-sbom` needs `fs-cli` from v2 on.** It exports through `fs-cli export` instead of the REST API, reusing an `fs-cli` an earlier step put on `PATH` and downloading one from `GET /cli/download` otherwise. On an egress-restricted runner that permits the API but not the binary download, install `fs-cli` yourself before this step.
+- **`download-sbom` needs `fs-cli` from v2 on.** It exports through `fs-cli export` instead of the REST API, reusing an `fs-cli` an earlier step put on `PATH` and downloading one from `GET /cli/download` otherwise. On an egress-restricted runner that permits the API but not the binary download, install `fs-cli` yourself before this step — a genuine native build for that runner, since the actions check the executable header of anything on `PATH` and download a replacement when it does not match, so a shim or foreign build fails anyway.
 - **An explicit project input beats an inherited project ID.** The two can name different projects, so when you pass `project-name` the action sends `--name` alone rather than letting fs-cli choose between them. `project-id` outranks `project-name` when both are given, because a UUID cannot be ambiguous.
 - **A project input needs `version` to locate anything.** `project-name`/`project-id` on their own cannot identify a version, so if an upstream step exported a version ID the action exports that instead and warns that the project input was ignored — the inherited ID may belong to a different project. Pass `version` to export by label. With no inherited ID either, the step fails.
 - **A `scan`-only workflow gets its version ID from `scan`.** `scan` reads the ID back from fs-cli's output and exports it, so `download-sbom` needs no `version-id` input after a `scan` in the same job. When fs-cli prints no ID (an interrupted scan, an older fs-cli), `scan` warns and you have to pass `version-id` yourself.
@@ -622,7 +623,7 @@ setup (validates auth, exports env vars, installs fs-cli)   [optional if only sc
   |
   +---> wait (blocks until the platform finishes scanning the version)
   |       |-- reads: FINITE_STATE_AUTH_TOKEN, FINITE_STATE_DOMAIN, FINITE_STATE_VERSION_ID
-  |       |-- requires: fs-cli already on PATH from setup, scan or upload
+  |       |-- installs fs-cli when no earlier step put one on PATH
   |       |-- outputs: none; fails the step on a failed or unfinished scan
   |
   v

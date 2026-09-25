@@ -24,6 +24,14 @@ describe('normalizeSbomFormat', () => {
     expect(() => normalizeSbomFormat('')).toThrow(/is not recognized/)
   })
 
+  // A plain-object lookup inherits these, so they resolved to a truthy
+  // non-string and were returned as if they were valid formats.
+  it('rejects inherited object keys instead of returning them', () => {
+    for (const key of ['constructor', '__proto__', 'toString', 'valueOf', 'hasOwnProperty']) {
+      expect(() => normalizeSbomFormat(key)).toThrow(/is not recognized/)
+    }
+  })
+
   it('appends a caller-supplied hint when there is one', () => {
     expect(() => normalizeSbomFormat('swid', 'sbom-format', 'Leave it unset.')).toThrow(
       /Leave it unset\./,

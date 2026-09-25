@@ -247,8 +247,13 @@ label. Every branch that drops an input you set says so in the log.
 `download-sbom` runs `fs-cli export` rather than calling the REST API directly, so from v2
 it needs `fs-cli`: it reuses one an earlier Finite State step put on `PATH`, and otherwise
 downloads it from `GET /cli/download`. A job where `download-sbom` is the only Finite State
-step therefore needs egress to that endpoint as well as to the API — if your runner allows
-the API but blocks the binary download, put `fs-cli` on `PATH` yourself before this step.
+step therefore needs egress to that endpoint as well as to the API.
+
+If your runner allows the API but blocks the binary download, put `fs-cli` on `PATH`
+yourself before this step — but it has to be a real fs-cli built for that runner's OS and
+architecture. The actions read the executable header of whatever they find on `PATH` and
+download a replacement when it does not match, so a wrapper script, a shim, or a build for
+another platform still reaches `GET /cli/download` and still fails there.
 
 ### Wait for the scan before exporting
 

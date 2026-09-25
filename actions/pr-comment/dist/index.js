@@ -69452,19 +69452,23 @@ exports.normalizeSbomFormat = normalizeSbomFormat;
  * Shared by `upload` (`sbom-format`) and `download-sbom` (`format`) so the two
  * cannot drift: a value one action accepts must not be an opaque fs-cli error in
  * the other.
+ *
+ * A `Map`, not an object literal: a plain object inherits `constructor` and
+ * `__proto__`, so those two inputs would resolve to a truthy non-string and be
+ * returned as if they were valid formats.
  */
-const SBOM_FORMATS = {
-    cdx: 'cyclonedx',
-    cyclonedx: 'cyclonedx',
-    spdx: 'spdx',
-};
+const SBOM_FORMATS = new Map([
+    ['cdx', 'cyclonedx'],
+    ['cyclonedx', 'cyclonedx'],
+    ['spdx', 'spdx'],
+]);
 /**
  * Normalises an SBOM format input to the token fs-cli's `--format` expects,
  * throwing a named error rather than letting a typo surface as a non-zero
  * fs-cli exit. Case and surrounding whitespace are not the caller's problem.
  */
 function normalizeSbomFormat(input, inputName = 'format', hint) {
-    const format = SBOM_FORMATS[input.trim().toLowerCase()];
+    const format = SBOM_FORMATS.get(input.trim().toLowerCase());
     if (!format) {
         throw new Error(`${inputName} "${input}" is not recognized. Valid: cdx (cyclonedx) or spdx.` +
             (hint ? ` ${hint}` : ''));

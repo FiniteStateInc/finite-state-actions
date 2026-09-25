@@ -116955,19 +116955,23 @@ exports.normalizeSbomFormat = normalizeSbomFormat;
  * Shared by `upload` (`sbom-format`) and `download-sbom` (`format`) so the two
  * cannot drift: a value one action accepts must not be an opaque fs-cli error in
  * the other.
+ *
+ * A `Map`, not an object literal: a plain object inherits `constructor` and
+ * `__proto__`, so those two inputs would resolve to a truthy non-string and be
+ * returned as if they were valid formats.
  */
-const SBOM_FORMATS = {
-    cdx: 'cyclonedx',
-    cyclonedx: 'cyclonedx',
-    spdx: 'spdx',
-};
+const SBOM_FORMATS = new Map([
+    ['cdx', 'cyclonedx'],
+    ['cyclonedx', 'cyclonedx'],
+    ['spdx', 'spdx'],
+]);
 /**
  * Normalises an SBOM format input to the token fs-cli's `--format` expects,
  * throwing a named error rather than letting a typo surface as a non-zero
  * fs-cli exit. Case and surrounding whitespace are not the caller's problem.
  */
 function normalizeSbomFormat(input, inputName = 'format', hint) {
-    const format = SBOM_FORMATS[input.trim().toLowerCase()];
+    const format = SBOM_FORMATS.get(input.trim().toLowerCase());
     if (!format) {
         throw new Error(`${inputName} "${input}" is not recognized. Valid: cdx (cyclonedx) or spdx.` +
             (hint ? ` ${hint}` : ''));
@@ -117089,8 +117093,9 @@ const core_1 = __nccwpck_require__(82950);
  *
  * A document that is present but unreadable is worth a warning, not a failed
  * step: the file is already on disk and the artifact upload still has to
- * happen. A *missing* file is the caller's problem, not this function's, and is
- * checked before the call — an exported SBOM that does not exist is a failure.
+ * happen. A missing or empty file is the caller's problem, not this function's,
+ * and both are checked before the call — an export that produced no usable
+ * bytes is a failure, not a count of zero.
  *
  * A count of 0 is reported three ways on purpose: an unparseable file warns with
  * the parse error, a document carrying neither array warns that the shape was
@@ -117098,9 +117103,9 @@ const core_1 = __nccwpck_require__(82950);
  * middle case a shape this function does not model is indistinguishable from an
  * SBOM with no components, and `component-count` is what downstream gates read.
  */
-function countComponents(file) {
+function countComponents(contents, file) {
     try {
-        const doc = JSON.parse((0, fs_1.readFileSync)(file, 'utf8'));
+        const doc = JSON.parse(contents);
         // Prefer whichever array actually carries entries: a merged or wrapped
         // document can hold an empty `components` beside a populated `packages`,
         // and `??` alone would report 0 for it.
@@ -117228,9 +117233,10 @@ async function run() {
             locator.push('--version-id', ctx.versionId);
         }
         else {
-            throw new Error('No project version to export. Provide version-id, or project-name and version, or ' +
-                'run scan or upload first — both export a version ID this action inherits. ' +
-                'setup alone only supplies one when it was given version-id itself.');
+            throw new Error('No project version to export. Provide version-id, or version together with ' +
+                'project-id or project-name, or run scan or upload first — both export a version ID ' +
+                'this action inherits. setup alone only supplies one when it was given version-id ' +
+                'itself.');
         }
         // ── Install or reuse fs-cli ──────────────────────────────────────────────
         // Reuses an fs-cli that an earlier Finite State step put on PATH and
@@ -117285,17 +117291,26 @@ async function run() {
             // exit does not carry.
             throw new Error(`fs-cli export exited ${exitCode} on ${ctx.domain}. See the fs-cli output above.`);
         }
-        // An exit-0 export that wrote nothing is a failure, not a warning. Left to
-        // countComponents it would surface as "component count unavailable" plus
-        // `component-count: 0` — which a gate reads as a clean SBOM — and then,
-        // only if upload-artifact is on, an opaque artifact error naming no cause.
+        // An exit-0 export that produced no usable bytes is a failure, not a
+        // warning. Left to countComponents it would surface as "component count
+        // unavailable" plus `component-count: 0` — which a gate reads as a clean
+        // SBOM — and then, only if upload-artifact is on, an opaque artifact error
+        // naming no cause. A zero-byte file is the same failure as a missing one:
+        // it clears `existsSync` but there is no SBOM in it.
         if (!(0, fs_1.existsSync)(outputFile)) {
             throw new Error(`fs-cli export reported success but wrote no file at ${outputFile}. ` +
                 'Check output-file and the fs-cli output above.');
         }
+        // Read once, then count from the contents: a second read purely to count
+        // would load the document twice.
+        const contents = (0, fs_1.readFileSync)(outputFile, 'utf8');
+        if (!contents.trim()) {
+            throw new Error(`fs-cli export reported success but wrote an empty file at ${outputFile}. ` +
+                'See the fs-cli output above.');
+        }
         core.info(`SBOM written to ${outputFile}`);
         // ── Set outputs ──────────────────────────────────────────────────────────
-        const componentCount = countComponents(outputFile);
+        const componentCount = countComponents(contents, outputFile);
         core.setOutput('file', outputFile);
         core.setOutput('component-count', String(componentCount));
         core.setOutput('artifact-name', artifactName);
