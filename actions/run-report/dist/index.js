@@ -115619,12 +115619,6 @@ class FsClient {
         return scans[0];
     }
     /**
-     * GET /sboms/{format}/{pvId}?includeVex={bool}
-     */
-    downloadSbom(pvId, format, includeVex) {
-        return this.get(`/sboms/${encodeURIComponent(format)}/${encodeURIComponent(pvId)}?includeVex=${includeVex}`);
-    }
-    /**
      * Polls getScanStatus until the scan reaches COMPLETED or FAILED, or until
      * timeoutMs elapses.
      */

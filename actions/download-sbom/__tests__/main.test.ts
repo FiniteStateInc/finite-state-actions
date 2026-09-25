@@ -176,6 +176,33 @@ describe('download-sbom action', () => {
     expect(core.setFailed).not.toHaveBeenCalled()
   })
 
+  // A shape this action does not model must not be indistinguishable from an
+  // SBOM that genuinely has no components: `component-count` is what downstream
+  // gates read, so a silent 0 there reads as a clean result.
+  it('warns when the SBOM parses but carries neither components nor packages', async () => {
+    mockReadFileSync.mockReturnValue(JSON.stringify({ spdxVersion: 'SPDX-3.0', elements: [] }))
+
+    await run()
+
+    expect(core.warning).toHaveBeenCalledWith(
+      expect.stringContaining('neither'),
+      expect.objectContaining({ title: 'Component count unavailable' }),
+    )
+    expect(core.setOutput).toHaveBeenCalledWith('component-count', '0')
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  // An empty SBOM is a legitimate 0 and must stay quiet, or the warning above
+  // would fire on every components-only export of a version with no packages.
+  it('reports 0 without warning for an SBOM with an empty components array', async () => {
+    mockReadFileSync.mockReturnValue(JSON.stringify({ bomFormat: 'CycloneDX', components: [] }))
+
+    await run()
+
+    expect(core.setOutput).toHaveBeenCalledWith('component-count', '0')
+    expect(core.warning).not.toHaveBeenCalled()
+  })
+
   it('resolves by project-name and version when no version ID is known', async () => {
     vi.mocked(core.getInput).mockImplementation((name: string) => {
       const inputs: Record<string, string> = {
@@ -200,6 +227,76 @@ describe('download-sbom action', () => {
     expect(args).toEqual(expect.arrayContaining(['--name', 'my-app', '--version', '1.2.3']))
     expect(args).not.toContain('--version-id')
     expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  // Typing a version label is an instruction to export that version, not the
+  // one an upstream scan happened to leave in FINITE_STATE_VERSION_ID. Without
+  // this precedence the label is silently ignored and the wrong SBOM ships.
+  it('prefers an explicit version label over an inherited version ID', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        'project-name': 'my-app',
+        version: '1.2.3',
+        'output-file': 'sbom.json',
+      }
+      return inputs[name] ?? ''
+    })
+    vi.mocked(readSetupContext).mockReturnValue({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      projectId: 'proj-123',
+      versionId: 'ver-456',
+    })
+
+    await run()
+
+    const args = fsCliArgs()
+    expect(args).toEqual(expect.arrayContaining(['--name', 'my-app', '--version', '1.2.3']))
+    expect(args).not.toContain('--version-id')
+    expect(args).not.toContain('ver-456')
+  })
+
+  // The explicit version-id input stays the most specific locator of all.
+  it('prefers an explicit version-id input over a version label', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        'version-id': 'ver-explicit',
+        'project-name': 'my-app',
+        version: '1.2.3',
+        'output-file': 'sbom.json',
+      }
+      return inputs[name] ?? ''
+    })
+    vi.mocked(readSetupContext).mockReturnValue({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      versionId: 'ver-explicit',
+    })
+
+    await run()
+
+    const args = fsCliArgs()
+    expect(args).toEqual(expect.arrayContaining(['--version-id', 'ver-explicit']))
+    expect(args).not.toContain('--version')
+  })
+
+  // With neither input the inherited ID still applies — this is what makes
+  // `scan` → `download-sbom` work with no inputs at all.
+  it('uses the inherited version ID when neither version input is given', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = { 'output-file': 'sbom.json' }
+      return inputs[name] ?? ''
+    })
+    vi.mocked(readSetupContext).mockReturnValue({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      projectId: 'proj-123',
+      versionId: 'ver-456',
+    })
+
+    await run()
+
+    expect(fsCliArgs()).toEqual(expect.arrayContaining(['--version-id', 'ver-456']))
   })
 
   it('prefers an explicit project-name over an inherited project ID', async () => {

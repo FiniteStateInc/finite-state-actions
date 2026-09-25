@@ -233,8 +233,16 @@ pass `version-id` to `setup` or to `download-sbom` yourself, or pass `project-na
     version: v1.2.3
 ```
 
-A `version-id` from an upstream step wins over `project-name`/`version`, so that form is
-for a job that exports an SBOM without scanning anything first.
+An explicit input always wins over inherited context: a `version-id` you pass is the most
+specific locator, and a `version` label you pass beats a `FINITE_STATE_VERSION_ID` left by
+an upstream `scan` or `upload`. The inherited ID applies only when you pass neither, which
+is what lets `download-sbom` follow a `scan` with no inputs at all.
+
+`download-sbom` runs `fs-cli export` rather than calling the REST API directly, so from v2
+it needs `fs-cli`: it reuses one an earlier Finite State step put on `PATH`, and otherwise
+downloads it from `GET /cli/download`. A job where `download-sbom` is the only Finite State
+step therefore needs egress to that endpoint as well as to the API — if your runner allows
+the API but blocks the binary download, put `fs-cli` on `PATH` yourself before this step.
 
 ### Wait for the scan before exporting
 

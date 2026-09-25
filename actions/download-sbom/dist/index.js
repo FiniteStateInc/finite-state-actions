@@ -117047,12 +117047,26 @@ const core_1 = __nccwpck_require__(82950);
  * the first reported 0 for every SPDX export. A document that cannot be read or
  * parsed is worth a warning, not a failed step: the file is already on disk and
  * the artifact upload still has to happen.
+ *
+ * Reading the whole file to count is bounded by fs-cli itself, whose
+ * `--max-size` rejects an SBOM over 64 MiB before it ever reaches disk.
+ *
+ * A count of 0 is reported three ways on purpose: an unreadable file warns with
+ * the parse error, a document carrying neither array warns that the shape was
+ * not recognised, and a genuinely empty SBOM returns 0 silently. Without the
+ * middle case a shape this function does not model is indistinguishable from an
+ * SBOM with no components, and `component-count` is what downstream gates read.
  */
 function countComponents(file) {
     try {
         const doc = JSON.parse((0, fs_1.readFileSync)(file, 'utf8'));
         const entries = doc.components ?? doc.packages;
-        return Array.isArray(entries) ? entries.length : 0;
+        if (!Array.isArray(entries)) {
+            core.warning(`${file} parsed as JSON but carries neither a CycloneDX "components" nor an SPDX ` +
+                `"packages" array. Reporting 0 components; the exported file itself is unaffected.`, { title: 'Component count unavailable' });
+            return 0;
+        }
+        return entries.length;
     }
     catch (err) {
         core.warning(`Could not count components in ${file}: ${err instanceof Error ? err.message : String(err)}`, { title: 'Component count unavailable' });
@@ -117097,16 +117111,27 @@ async function run() {
                 : ctx.projectName
                     ? ['--name', ctx.projectName]
                     : [];
+        // Explicit inputs beat inherited context, the same rule the project
+        // resolution above follows. An explicit version-id is the most specific
+        // locator there is; failing that, a version label typed into this step is
+        // an instruction to export something other than whatever an upstream scan
+        // left in the environment, so it outranks the inherited ID. Only with
+        // neither input does the inherited version ID apply — which is what makes
+        // `scan` → `download-sbom` with no inputs work.
         const locator = [];
-        if (ctx.versionId) {
-            locator.push('--version-id', ctx.versionId);
+        if (versionIdInput) {
+            locator.push('--version-id', versionIdInput);
         }
         else if (version && project.length) {
             locator.push(...project, '--version', version);
         }
+        else if (ctx.versionId) {
+            locator.push('--version-id', ctx.versionId);
+        }
         else {
-            throw new Error('No project version to export. Provide version-id, or project-name and version, ' +
-                'or run scan, upload or setup first.');
+            throw new Error('No project version to export. Provide version-id, or project-name and version, or ' +
+                'run scan or upload first — both export a version ID this action inherits. ' +
+                'setup alone only supplies one when it was given version-id itself.');
         }
         // ── Install or reuse fs-cli ──────────────────────────────────────────────
         // Reuses an fs-cli that an earlier Finite State step put on PATH and
@@ -117122,6 +117147,16 @@ async function run() {
         //
         // The token goes through FS_TOKEN so it stays out of the argument list, and
         // the path is quoted because exec splits its first parameter on spaces.
+        //
+        // The argv below matches `fs-cli export --help`: `--endpoint`, `--format`
+        // (cyclonedx | spdx), `--include-vex` as a `=<bool>` switch defaulting to
+        // true, `--output-file`, `--overwrite`, and the four locator flags
+        // `--name`/`--project-id`/`--version`/`--version-id`. Unlike `upload`,
+        // `export` does not require `--name` alongside `--project-id` — its help is
+        // explicit that `--project-id` and `--version-id` are there to skip the name
+        // lookups — so the `--project-id` branch deliberately sends the ID alone.
+        // fs-cli also caps the response at `--max-size` (64 MiB by default), which
+        // is the bound countComponents relies on.
         const outputDir = (0, path_1.dirname)(outputFile);
         if (outputDir && outputDir !== '.') {
             (0, fs_1.mkdirSync)(outputDir, { recursive: true });
