@@ -12,13 +12,13 @@ inputs:
     description: 'Finite State platform domain. Defaults to the setup context, then app.finitestate.io.'
     required: false
   version-id:
-    description: 'Version ID override (falls back to setup context). Skips the name lookups.'
+    description: 'Version ID override (falls back to setup context). Skips the name lookups and outranks project-name/version.'
     required: false
   project-name:
     description: 'Project name, resolved by fs-cli. Used with version when no version-id is known. Falls back to the setup context.'
     required: false
   version:
-    description: 'Version label, resolved by fs-cli against the version name or number. Requires project-name (or a setup context carrying the project). Ignored when version-id is set.'
+    description: 'Version label, resolved by fs-cli against the version name or number. Requires project-name (or a setup context carrying the project). Beats a version ID inherited from an upstream scan or upload; only an explicit version-id input takes precedence.'
     required: false
   format:
     description: 'SBOM format: cyclonedx or spdx'
@@ -46,7 +46,7 @@ outputs:
   artifact-name:
     description: 'Artifact name — set even when upload-artifact is false'
   component-count:
-    description: 'Number of components in the SBOM'
+    description: 'Number of entries in the SBOM — CycloneDX components or SPDX packages. 0 with a warning when the file cannot be parsed or carries neither array.'
 runs:
   using: 'node24'
   main: 'dist/index.js'

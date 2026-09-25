@@ -256,6 +256,26 @@ describe('download-sbom action', () => {
     expect(args).not.toContain('ver-456')
   })
 
+  // The label must not fall through to the inherited ID when no project can be
+  // built for it: that would export the upstream scan's version while the
+  // workflow asked for a label, which is the override this precedence prevents.
+  it('fails rather than using an inherited version ID when a version label has no project', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = { version: '1.2.3', 'output-file': 'sbom.json' }
+      return inputs[name] ?? ''
+    })
+    vi.mocked(readSetupContext).mockReturnValue({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      versionId: 'ver-456',
+    })
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('needs a project'))
+    expect(mockExec).not.toHaveBeenCalled()
+  })
+
   // The explicit version-id input stays the most specific locator of all.
   it('prefers an explicit version-id input over a version label', async () => {
     vi.mocked(core.getInput).mockImplementation((name: string) => {

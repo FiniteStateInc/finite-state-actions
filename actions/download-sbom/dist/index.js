@@ -117122,7 +117122,15 @@ async function run() {
         if (versionIdInput) {
             locator.push('--version-id', versionIdInput);
         }
-        else if (version && project.length) {
+        else if (version) {
+            // A label needs a project to resolve against, and falling through to the
+            // inherited ID when there is none would export the upstream scan's
+            // version while the workflow asked for a label — the silent override this
+            // precedence exists to prevent. Missing project, missing export.
+            if (!project.length) {
+                throw new Error(`version "${version}" needs a project to resolve against. Pass project-name, or run ` +
+                    'setup, scan or upload first so a project is inherited, or pass version-id instead.');
+            }
             locator.push(...project, '--version', version);
         }
         else if (ctx.versionId) {

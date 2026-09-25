@@ -4,17 +4,17 @@ A collection of GitHub Actions for integrating [Finite State](https://finitestat
 
 ## Actions
 
-| Action                                   | Description                                                                      |
-| ---------------------------------------- | -------------------------------------------------------------------------------- |
-| [setup](./actions/setup)                 | Authenticate with the Finite State platform, configure env, install fs-cli       |
-| [scan](./actions/scan)                   | Scan project dependencies with fs-cli and upload results (runs standalone)       |
-| [upload](./actions/upload)               | Upload a firmware, SBOM, or third-party scan file through fs-cli (standalone)    |
-| [upload-scan](./actions/upload-scan)     | Deprecated alias for `upload`; forwards inputs and outputs, warns, removed in v3 |
-| [wait](./actions/wait)                   | Wait for the platform to finish scanning a version                               |
-| [run-report](./actions/run-report)       | Generate security reports using fs-report                                        |
-| [quality-gate](./actions/quality-gate)   | Fail the build if findings exceed configurable thresholds                        |
-| [pr-comment](./actions/pr-comment)       | Post a findings summary as a pull request comment                                |
-| [download-sbom](./actions/download-sbom) | Download the SBOM for a project version                                          |
+| Action                                   | Description                                                                        |
+| ---------------------------------------- | ---------------------------------------------------------------------------------- |
+| [setup](./actions/setup)                 | Authenticate with the Finite State platform, configure env, install fs-cli         |
+| [scan](./actions/scan)                   | Scan project dependencies with fs-cli and upload results (runs standalone)         |
+| [upload](./actions/upload)               | Upload a firmware, SBOM, or third-party scan file through fs-cli (standalone)      |
+| [upload-scan](./actions/upload-scan)     | Deprecated alias for `upload`; forwards inputs and outputs, warns, removed in v3   |
+| [wait](./actions/wait)                   | Wait for the platform to finish scanning a version                                 |
+| [run-report](./actions/run-report)       | Generate security reports using fs-report                                          |
+| [quality-gate](./actions/quality-gate)   | Fail the build if findings exceed configurable thresholds                          |
+| [pr-comment](./actions/pr-comment)       | Post a findings summary as a pull request comment                                  |
+| [download-sbom](./actions/download-sbom) | Export a version's CycloneDX/SPDX SBOM via fs-cli, upload as artifact (standalone) |
 
 ## Quick Start
 

@@ -553,26 +553,26 @@ Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
 
 **Inputs:**
 
-| Input             | Required | Default             | Description                                                                                                  |
-| ----------------- | -------- | ------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `api-token`       | no       | from setup          | FS API token. Required only when `setup`/`scan`/`upload` did not run                                         |
-| `domain`          | no       | from setup          | Platform domain. Falls back to setup context, then `app.finitestate.io`                                      |
-| `version-id`      | no       | from setup/upload   | Falls back to setup context or upload output. Skips the name lookups                                         |
-| `project-name`    | no       | from setup          | Project name, resolved by fs-cli. Used with `version` when no ID is known                                    |
-| `version`         | no       | —                   | Version label, resolved by fs-cli. Needs `project-name` or a setup project. Ignored when `version-id` is set |
-| `format`          | no       | `cyclonedx`         | `cyclonedx` or `spdx`                                                                                        |
-| `include-vex`     | no       | `true`              | Include VEX triage data in SBOM                                                                              |
-| `output-file`     | no       | `sbom.json`         | Output file path                                                                                             |
-| `upload-artifact` | no       | `true`              | Upload as workflow artifact                                                                                  |
-| `artifact-name`   | no       | `finite-state-sbom` | Artifact name                                                                                                |
+| Input             | Required | Default             | Description                                                                                                 |
+| ----------------- | -------- | ------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `api-token`       | no       | from setup          | FS API token. Required only when `setup`/`scan`/`upload` did not run                                        |
+| `domain`          | no       | from setup          | Platform domain. Falls back to setup context, then `app.finitestate.io`                                     |
+| `version-id`      | no       | from setup/upload   | Falls back to setup context or upload output. Skips the name lookups; outranks `project-name`/`version`     |
+| `project-name`    | no       | from setup          | Project name, resolved by fs-cli. Used with `version` when no ID is known                                   |
+| `version`         | no       | —                   | Version label, resolved by fs-cli. Needs `project-name` or a setup project. Beats an _inherited_ version ID |
+| `format`          | no       | `cyclonedx`         | `cyclonedx` or `spdx`                                                                                       |
+| `include-vex`     | no       | `true`              | Include VEX triage data in SBOM                                                                             |
+| `output-file`     | no       | `sbom.json`         | Output file path                                                                                            |
+| `upload-artifact` | no       | `true`              | Upload as workflow artifact                                                                                 |
+| `artifact-name`   | no       | `finite-state-sbom` | Artifact name                                                                                               |
 
 **Outputs:**
 
-| Output            | Description                                                |
-| ----------------- | ---------------------------------------------------------- |
-| `file`            | Path to the downloaded SBOM file                           |
-| `artifact-name`   | Artifact name — set even when `upload-artifact` is `false` |
-| `component-count` | Number of components in the SBOM                           |
+| Output            | Description                                                                                                                 |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `file`            | Path to the downloaded SBOM file                                                                                            |
+| `artifact-name`   | Artifact name — set even when `upload-artifact` is `false`                                                                  |
+| `component-count` | CycloneDX `components` or SPDX `packages` count. `0` with a warning when the file cannot be parsed or carries neither array |
 
 **Behavior:** Runs `fs-cli export --format <format> --include-vex=<bool> --output-file <path> --overwrite`, going through `ensureFsCli` like `scan`, `upload` and `wait` — so it reuses an fs-cli an earlier step put on `PATH` and installs one when this is the first Finite State step in the job. fs-cli writes the document byte for byte, so the file keeps the formatting the platform produced rather than a re-serialised copy. The token is passed via `FS_TOKEN`, never on the command line. Auth comes from `api-token`/`domain` when given, otherwise from the env vars `setup`, `scan` or `upload` exported. Optionally uploads the file as a workflow artifact. The only REST call the action makes is the fs-cli download when the binary is not already on `PATH`.
 
