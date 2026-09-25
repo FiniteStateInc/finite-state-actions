@@ -38,11 +38,14 @@ const mockExistsSync = vi.fn(() => true)
 
 const mockRmSync = vi.fn()
 
+const mockRenameSync = vi.fn()
+
 vi.mock('fs', () => ({
   mkdirSync: vi.fn(),
   readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
   existsSync: (...args: unknown[]) => mockExistsSync(...args),
   rmSync: (...args: unknown[]) => mockRmSync(...args),
+  renameSync: (...args: unknown[]) => mockRenameSync(...args),
 }))
 
 // ── Mock @finite-state/core ────────────────────────────────────────────────────
@@ -144,7 +147,7 @@ describe('download-sbom action', () => {
       'cyclonedx',
       '--include-vex=true',
       '--output-file',
-      'sbom.json',
+      'sbom.json.part',
       '--overwrite',
     ])
 
@@ -174,6 +177,10 @@ describe('download-sbom action', () => {
   })
 
   it('counts SPDX packages, not just CycloneDX components', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = { format: 'spdx', 'output-file': 'sbom.json' }
+      return inputs[name] ?? ''
+    })
     mockReadFileSync.mockReturnValue(
       JSON.stringify({
         spdxVersion: 'SPDX-2.3',
@@ -184,6 +191,7 @@ describe('download-sbom action', () => {
     await run()
 
     expect(core.setOutput).toHaveBeenCalledWith('component-count', '2')
+    expect(core.warning).not.toHaveBeenCalled()
   })
 
   it('warns instead of failing when the written SBOM cannot be parsed', async () => {
@@ -206,7 +214,7 @@ describe('download-sbom action', () => {
     await run()
 
     expect(core.warning).toHaveBeenCalledWith(
-      expect.stringContaining('neither'),
+      expect.stringContaining('no "components" array'),
       expect.objectContaining({ title: 'Component count unavailable' }),
     )
     expect(core.setOutput).toHaveBeenCalledWith('component-count', '0')
@@ -224,18 +232,57 @@ describe('download-sbom action', () => {
     expect(core.warning).not.toHaveBeenCalled()
   })
 
-  // A re-run in the same job, or a reused self-hosted workspace, can leave a
-  // previous version's SBOM at this path. Without clearing it first, an exit-0
-  // run that wrote nothing would pass both post-export checks and publish the
-  // stale document as the version just requested.
-  it('clears the destination before exporting', async () => {
+  // Exports to a sibling temp path and moves it into place only once checked,
+  // so a stale document cannot be republished and the destination is never
+  // touched until there is something valid to put there.
+  it('exports to a temp file and renames it into place', async () => {
     await run()
 
-    expect(mockRmSync).toHaveBeenCalledWith('sbom.json', { force: true })
-    // Before fs-cli runs, not after it writes.
-    expect(mockRmSync.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(fsCliArgs()).toEqual(expect.arrayContaining(['--output-file', 'sbom.json.part']))
+    expect(mockRenameSync).toHaveBeenCalledWith('sbom.json.part', 'sbom.json')
+    expect(mockRenameSync.mock.invocationCallOrder[0]).toBeGreaterThan(
       mockExec.mock.invocationCallOrder[0],
     )
+    expect(mockRmSync).not.toHaveBeenCalledWith('sbom.json', expect.anything())
+  })
+
+  // The previous SBOM at the destination has to survive a failed export: it may
+  // be the only copy, and clearing the path up front would have destroyed it.
+  it('leaves an existing SBOM in place when the export fails', async () => {
+    mockExec.mockResolvedValue(101)
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalled()
+    expect(mockRenameSync).not.toHaveBeenCalled()
+    expect(mockRmSync).not.toHaveBeenCalledWith('sbom.json', expect.anything())
+    expect(mockRmSync).toHaveBeenCalledWith('sbom.json.part', { force: true })
+  })
+
+  it('does not publish an empty export, and leaves the destination alone', async () => {
+    mockReadFileSync.mockReturnValue('')
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('empty file'))
+    expect(mockRenameSync).not.toHaveBeenCalled()
+  })
+
+  // The rounding branch is only reached by a value that is not a whole number
+  // of minutes, so 600 would never exercise it.
+  it('warns when the timeout is rounded up to whole minutes', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = { timeout: '90', 'output-file': 'sbom.json' }
+      return inputs[name] ?? ''
+    })
+
+    await run()
+
+    expect(core.warning).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ title: 'Timeout rounded' }),
+    )
+    expect(fsCliArgs()).toEqual(expect.arrayContaining(['--timeout', '2']))
   })
 
   // The read feeds the count, so it is isolated like the parse: a document too
@@ -362,7 +409,7 @@ describe('download-sbom action', () => {
     expect(core.setOutput).toHaveBeenCalledWith('component-count', '2')
   })
 
-  it.each([['64.5'], ['-1'], ['abc'], ['0']])(
+  it.each([['64.5'], ['-1'], ['abc'], ['64MB'], ['1e3']])(
     'fails on max-size %s rather than letting fs-cli report it',
     async (value) => {
       vi.mocked(core.getInput).mockImplementation((name: string) => {
@@ -476,16 +523,17 @@ describe('download-sbom action', () => {
     expect(core.setOutput).not.toHaveBeenCalledWith('component-count', '0')
   })
 
-  // Counting must not stop at an empty `components` when `packages` is
-  // populated: a merged or wrapped document holds both.
-  it('counts packages when components is present but empty', async () => {
+  // No cross-format fallback: a CycloneDX export with no components genuinely
+  // has none, and reporting the packages count would be a non-zero number for
+  // a document that is empty in the format that was asked for.
+  it('reports 0 for a cyclonedx export with empty components despite packages', async () => {
     mockReadFileSync.mockReturnValue(
       JSON.stringify({ components: [], packages: [{ name: 'openssl' }, { name: 'zlib' }] }),
     )
 
     await run()
 
-    expect(core.setOutput).toHaveBeenCalledWith('component-count', '2')
+    expect(core.setOutput).toHaveBeenCalledWith('component-count', '0')
     expect(core.warning).not.toHaveBeenCalled()
   })
 
@@ -632,7 +680,7 @@ describe('download-sbom action', () => {
   })
 
   // The --project-id branch used to be reachable only from inherited env, so a
-  // setup-less job that knew its project UUID had no way to pass it.
+  // setup-less job that knew its project ID had no way to pass it.
   it('accepts an explicit project-id and prefers it over project-name', async () => {
     vi.mocked(core.getInput).mockImplementation((name: string) => {
       const inputs: Record<string, string> = {

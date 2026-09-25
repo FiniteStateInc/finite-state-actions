@@ -15,7 +15,7 @@ inputs:
     description: 'Version ID override (falls back to setup context). Skips the name lookups and outranks project-name/version.'
     required: false
   project-id:
-    description: 'Platform project ID (a signed 64-bit integer, not a UUID), used with version when no version-id is known. Skips the name lookup and outranks project-name. Falls back to the setup context.'
+    description: 'Platform project ID (a UUID), used with version when no version-id is known. Skips the name lookup and outranks project-name. Falls back to the setup context.'
     required: false
   project-name:
     description: 'Project name, resolved by fs-cli. Used with version when no version-id is known. Falls back to the setup context.'
@@ -55,7 +55,7 @@ outputs:
   artifact-name:
     description: 'Artifact name — set even when upload-artifact is false'
   component-count:
-    description: 'Number of entries in the SBOM — CycloneDX components or SPDX packages. Not comparable across formats: SPDX usually counts the describing package too, CycloneDX omits metadata.component and nested components. 0 with a warning when the file cannot be parsed or carries neither array.'
+    description: 'Number of entries in the SBOM — components for cyclonedx, packages for spdx, chosen by the format input with no fallback to the other. Not comparable across formats: SPDX usually counts the describing package too, CycloneDX omits metadata.component and nested components. 0 with a warning when the file cannot be read or parsed, or carries no array for the requested format.'
 runs:
   using: 'node24'
   main: 'dist/index.js'

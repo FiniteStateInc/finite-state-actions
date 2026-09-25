@@ -117085,13 +117085,13 @@ const core_1 = __nccwpck_require__(82950);
  * Counts the entries in an SBOM document written by fs-cli.
  *
  * CycloneDX calls them `components` and SPDX calls them `packages`; reading only
- * the first reported 0 for every SPDX export. The requested format picks the key
- * and the other is a fallback, so a document holding both is counted by the one
- * that was actually asked for. The two are not quite the same population either
- * — SPDX usually includes the document's own describing package, CycloneDX
- * excludes `metadata.component` and nested `components[].components` — so the
- * count is a rough size signal, not a figure to compare across formats. That
- * caveat is documented on the output.
+ * the first reported 0 for every SPDX export. The requested format picks which
+ * key to read and there is no fallback to the other, so the number always
+ * describes the format that was asked for. The two are not the same population
+ * anyway — SPDX usually includes the document's own describing package,
+ * CycloneDX excludes `metadata.component` and nested `components[].components`
+ * — so the count is a rough size signal, not a figure to compare across
+ * formats. That caveat is documented on the output.
  *
  * A document that is present but unreadable is worth a warning, not a failed
  * step: the file is already on disk and the artifact upload still has to
@@ -117108,21 +117108,17 @@ const core_1 = __nccwpck_require__(82950);
 function countComponents(contents, file, format) {
     try {
         const doc = JSON.parse(contents);
-        // The requested format decides which key to read, so a document carrying
-        // both non-empty arrays is not a guess: an SPDX export is counted by
-        // `packages` even though `components` is also present. The other key is the
-        // fallback, which covers a platform that answers in the sibling format and
-        // a merged or wrapped document with one of the two empty.
-        const [preferred, fallback] = format === 'spdx' ? [doc.packages, doc.components] : [doc.components, doc.packages];
-        const populated = [preferred, fallback].find((entries) => Array.isArray(entries) && entries.length > 0);
-        if (Array.isArray(populated)) {
-            return populated.length;
+        // One key, chosen by the format that was requested. No cross-format
+        // fallback: counting `packages` for a CycloneDX export would report a
+        // non-zero number for a document that genuinely has no components, which
+        // is worse than reporting the zero that is true of the format asked for.
+        const key = format === 'spdx' ? 'packages' : 'components';
+        const entries = doc[key];
+        if (Array.isArray(entries)) {
+            return entries.length;
         }
-        if (Array.isArray(doc.components) || Array.isArray(doc.packages)) {
-            return 0;
-        }
-        core.warning(`${file} parsed as JSON but carries neither a CycloneDX "components" nor an SPDX ` +
-            `"packages" array. Reporting 0 components; the exported file itself is unaffected.`, { title: 'Component count unavailable' });
+        core.warning(`${file} parsed as JSON but carries no "${key}" array, which is where a ${format} ` +
+            `document lists its entries. Reporting 0; the exported file itself is unaffected.`, { title: 'Component count unavailable' });
         return 0;
     }
     catch (err) {
@@ -117142,11 +117138,12 @@ async function run() {
         // uses, so `cdx` and `CycloneDX` mean here what they mean there instead of
         // reaching fs-cli unmapped.
         const format = (0, core_1.normalizeSbomFormat)(core.getInput('format') || 'cyclonedx');
-        // Validated here rather than left to fs-cli, which reports a bad value as a
-        // generic non-zero exit. MiB, so a whole number above zero.
+        // Shape only: catch "64MB", "1.5" and "abc" before they reach fs-cli as a
+        // generic non-zero exit. What a given number means is fs-cli's to define,
+        // so no range is imposed here.
         const maxSizeInput = core.getInput('max-size') || undefined;
-        if (maxSizeInput !== undefined && !/^[1-9][0-9]*$/.test(maxSizeInput)) {
-            throw new Error(`max-size "${maxSizeInput}" is not a whole number of MiB above zero. ` +
+        if (maxSizeInput !== undefined && !/^[0-9]+$/.test(maxSizeInput)) {
+            throw new Error(`max-size "${maxSizeInput}" is not a whole number of MiB. ` +
                 "Leave it unset to use fs-cli's default of 64.");
         }
         const maxSize = maxSizeInput;
@@ -117189,7 +117186,8 @@ async function run() {
         // Either explicit project input wins over inherited context: the two can
         // name different projects, and sending both would leave fs-cli to pick. An
         // explicit project-id outranks an explicit project-name because an ID
-        // identifies exactly one project, whereas a name can match several.
+        // identifies exactly one project, whereas a name can match several. The ID
+        // is a UUID, the same shape core's isProjectId accepts.
         if (projectIdInput && projectNameInput) {
             core.warning(`project-id ${projectIdInput} and project-name "${projectNameInput}" were both given. ` +
                 'Using project-id, which identifies exactly one project; project-name was not used. ' +
@@ -117308,12 +117306,15 @@ async function run() {
         if (outputDir && outputDir !== '.') {
             (0, fs_1.mkdirSync)(outputDir, { recursive: true });
         }
-        // Clear the destination first, so the checks after the export are actually
-        // about this export. A re-run in the same job, or a reused self-hosted
-        // workspace, can leave a previous version's SBOM at this path — and an
-        // exit-0 run that wrote nothing would then publish that stale document, and
-        // its component count, as the version just asked for.
-        (0, fs_1.rmSync)(outputFile, { force: true });
+        // fs-cli writes to a sibling temp path and the result is moved into place
+        // only once it has been checked. Two problems that solves: a re-run or a
+        // reused self-hosted workspace can leave a previous version's SBOM at the
+        // destination, which an exit-0 run that wrote nothing would republish as
+        // the version just asked for; and clearing the destination up front to
+        // prevent that would destroy a good SBOM whenever the export then failed.
+        // A `.part` sibling keeps the rename on one filesystem, so it is atomic.
+        const tempFile = `${outputFile}.part`;
+        (0, fs_1.rmSync)(tempFile, { force: true });
         core.info(`Exporting ${format} SBOM to ${outputFile} (includeVex=${includeVex})...`);
         const exitCode = await exec.exec((0, core_1.quoteExecPath)(fsCli), [
             'export',
@@ -117326,19 +117327,21 @@ async function run() {
             ...(maxSize ? ['--max-size', maxSize] : []),
             ...(timeoutMinutes ? ['--timeout', String(timeoutMinutes)] : []),
             '--output-file',
-            outputFile,
+            tempFile,
             '--overwrite',
         ], {
             ignoreReturnCode: true,
             env: { ...process.env, FS_TOKEN: ctx.apiToken },
         });
         if (exitCode !== 0) {
+            (0, fs_1.rmSync)(tempFile, { force: true });
             // fs-cli has already printed why; this adds the context a bare non-zero
             // exit does not carry.
+            // No version number in the message: a stamped "verified against vX" rots
+            // the moment fs-cli ships again, and nothing here pins it.
             throw new Error(`fs-cli export exited ${exitCode} on ${ctx.domain}. See the fs-cli output above. ` +
                 'If it reports an unknown command or flag, the fs-cli on PATH predates the export ' +
-                'surface this action uses (verified against v2.3.35) — let this action install its ' +
-                'own by removing the older binary from PATH.');
+                'surface this action uses — remove that binary so this action installs its own.');
         }
         // An exit-0 export that produced no usable bytes is a failure, not a
         // warning. Left to countComponents it would surface as "component count
@@ -117346,8 +117349,8 @@ async function run() {
         // SBOM — and then, only if upload-artifact is on, an opaque artifact error
         // naming no cause. A zero-byte file is the same failure as a missing one:
         // it clears `existsSync` but there is no SBOM in it.
-        if (!(0, fs_1.existsSync)(outputFile)) {
-            throw new Error(`fs-cli export reported success but wrote no file at ${outputFile}. ` +
+        if (!(0, fs_1.existsSync)(tempFile)) {
+            throw new Error(`fs-cli export reported success but wrote no file at ${tempFile}. ` +
                 'Check output-file and the fs-cli output above.');
         }
         // Read once, then count from the contents: a second read purely to count
@@ -117357,7 +117360,7 @@ async function run() {
         // and is sitting on disk ready to upload.
         let contents;
         try {
-            contents = (0, fs_1.readFileSync)(outputFile, 'utf8');
+            contents = (0, fs_1.readFileSync)(tempFile, 'utf8');
         }
         catch (err) {
             core.warning(`Could not read ${outputFile} to count components: ` +
@@ -117365,9 +117368,12 @@ async function run() {
                 `itself is unaffected and is still uploaded.`, { title: 'Component count unavailable' });
         }
         if (contents !== undefined && !contents.trim()) {
+            (0, fs_1.rmSync)(tempFile, { force: true });
             throw new Error(`fs-cli export reported success but wrote an empty file at ${outputFile}. ` +
                 'See the fs-cli output above.');
         }
+        // Checked: this is a real export, so it can take the destination.
+        (0, fs_1.renameSync)(tempFile, outputFile);
         core.info(`SBOM written to ${outputFile}`);
         // ── Set outputs ──────────────────────────────────────────────────────────
         const componentCount = contents === undefined ? 0 : countComponents(contents, outputFile, format);
