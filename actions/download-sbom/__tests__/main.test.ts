@@ -34,19 +34,29 @@ vi.mock('@actions/artifact', () => ({
 
 const mockReadFileSync = vi.fn()
 
+const mockExistsSync = vi.fn(() => true)
+
 vi.mock('fs', () => ({
   mkdirSync: vi.fn(),
   readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
+  existsSync: (...args: unknown[]) => mockExistsSync(...args),
 }))
 
 // ── Mock @finite-state/core ────────────────────────────────────────────────────
 
-vi.mock('@finite-state/core', () => ({
-  FsClient: vi.fn().mockImplementation(() => ({})),
-  ensureFsCli: vi.fn(async () => '/tmp/fs-cli/fs-cli'),
-  quoteExecPath: (p: string) => `"${p}"`,
-  readSetupContext: vi.fn(),
-}))
+vi.mock('@finite-state/core', async () => {
+  // The real validator, imported from source the way the upload action's suite
+  // does: format validation is the behaviour under test in the format cases, so
+  // a stub would assert nothing and could drift from core.
+  const { normalizeSbomFormat } = await import('../../../packages/core/src/sbom-format')
+  return {
+    FsClient: vi.fn().mockImplementation(() => ({})),
+    ensureFsCli: vi.fn(async () => '/tmp/fs-cli/fs-cli'),
+    quoteExecPath: (p: string) => `"${p}"`,
+    readSetupContext: vi.fn(),
+    normalizeSbomFormat,
+  }
+})
 
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
 
@@ -104,6 +114,9 @@ describe('download-sbom action', () => {
     )
 
     mockUploadArtifact.mockResolvedValue({ artifactId: 99, size: 2048 })
+
+    // vi.clearAllMocks() drops the default return value along with the calls.
+    mockExistsSync.mockReturnValue(true)
   })
 
   it('exports a CycloneDX SBOM via fs-cli and uploads the artifact', async () => {
@@ -254,6 +267,172 @@ describe('download-sbom action', () => {
     expect(args).toEqual(expect.arrayContaining(['--name', 'my-app', '--version', '1.2.3']))
     expect(args).not.toContain('--version-id')
     expect(args).not.toContain('ver-456')
+  })
+
+  // An exit-0 export that wrote nothing must fail rather than publish
+  // component-count: 0, which a downstream gate reads as a clean SBOM.
+  it('fails when fs-cli exits 0 but wrote no file', async () => {
+    mockExistsSync.mockReturnValue(false)
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('wrote no file'))
+    expect(mockUploadArtifact).not.toHaveBeenCalled()
+  })
+
+  // Counting must not stop at an empty `components` when `packages` is
+  // populated: a merged or wrapped document holds both.
+  it('counts packages when components is present but empty', async () => {
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({ components: [], packages: [{ name: 'openssl' }, { name: 'zlib' }] }),
+    )
+
+    await run()
+
+    expect(core.setOutput).toHaveBeenCalledWith('component-count', '2')
+    expect(core.warning).not.toHaveBeenCalled()
+  })
+
+  it('accepts the cdx alias and normalises case for format', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = { format: 'CDX', 'output-file': 'sbom.json' }
+      return inputs[name] ?? ''
+    })
+
+    await run()
+
+    expect(fsCliArgs()).toEqual(expect.arrayContaining(['--format', 'cyclonedx']))
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('fails on an unrecognized format instead of passing it to fs-cli', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = { format: 'spdx-json', 'output-file': 'sbom.json' }
+      return inputs[name] ?? ''
+    })
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('is not recognized'))
+    expect(mockExec).not.toHaveBeenCalled()
+  })
+
+  // The REST path this replaced imposed no size limit, so the input is the only
+  // way back to that behaviour for a version with a very large SBOM.
+  it('passes --max-size only when the input is set', async () => {
+    await run()
+    expect(fsCliArgs()).not.toContain('--max-size')
+
+    vi.clearAllMocks()
+    mockExistsSync.mockReturnValue(true)
+    mockExec.mockResolvedValue(0)
+    mockReadFileSync.mockReturnValue(JSON.stringify({ components: [] }))
+    vi.mocked(readSetupContext).mockReturnValue({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      versionId: 'ver-456',
+    })
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = { 'max-size': '256', 'output-file': 'sbom.json' }
+      return inputs[name] ?? ''
+    })
+
+    await run()
+
+    expect(fsCliArgs()).toEqual(expect.arrayContaining(['--max-size', '256']))
+  })
+
+  // An explicit version-id shadows the other locator inputs; saying so is what
+  // stops a mistaken version-id from looking like the label applied.
+  it('warns that a version-id shadowed the project and version inputs', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        'version-id': 'ver-explicit',
+        'project-name': 'my-app',
+        version: '1.2.3',
+        'output-file': 'sbom.json',
+      }
+      return inputs[name] ?? ''
+    })
+    vi.mocked(readSetupContext).mockReturnValue({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      versionId: 'ver-explicit',
+    })
+
+    await run()
+
+    expect(core.warning).toHaveBeenCalledWith(
+      expect.stringContaining('project-name, version'),
+      expect.objectContaining({ title: 'Locator inputs ignored' }),
+    )
+  })
+
+  // Names every ignored project input, so an operator does not fix one and
+  // leave the other.
+  it('names both project inputs when both are dropped for an inherited ID', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        'project-id': 'proj-explicit',
+        'project-name': 'my-app',
+        'output-file': 'sbom.json',
+      }
+      return inputs[name] ?? ''
+    })
+    vi.mocked(readSetupContext).mockReturnValue({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      projectId: 'proj-explicit',
+      projectName: 'my-app',
+      versionId: 'ver-456',
+    })
+
+    await run()
+
+    expect(core.warning).toHaveBeenCalledWith(
+      expect.stringContaining('project-id and project-name'),
+      expect.objectContaining({ title: 'Project input ignored' }),
+    )
+  })
+
+  // The inherited-name branch: FINITE_STATE_PROJECT_NAME with no project UUID,
+  // plus an explicit label. Previously only the inherited-ID path was covered.
+  it('resolves an inherited project name with an explicit version label', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = { version: '1.2.3', 'output-file': 'sbom.json' }
+      return inputs[name] ?? ''
+    })
+    vi.mocked(readSetupContext).mockReturnValue({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      projectId: undefined,
+      projectName: 'inherited-app',
+      versionId: undefined,
+    })
+
+    await run()
+
+    const args = fsCliArgs()
+    expect(args).toEqual(expect.arrayContaining(['--name', 'inherited-app', '--version', '1.2.3']))
+    expect(args).not.toContain('--project-id')
+  })
+
+  it('passes both project inputs into readSetupContext', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        'project-id': 'proj-explicit',
+        'project-name': 'my-app',
+        version: '1.2.3',
+        'output-file': 'sbom.json',
+      }
+      return inputs[name] ?? ''
+    })
+
+    await run()
+
+    expect(readSetupContext).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: 'proj-explicit', projectName: 'my-app' }),
+    )
   })
 
   // The --project-id branch used to be reachable only from inherited env, so a

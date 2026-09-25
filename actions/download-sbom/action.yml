@@ -21,12 +21,15 @@ inputs:
     description: 'Project name, resolved by fs-cli. Used with version when no version-id is known. Falls back to the setup context.'
     required: false
   version:
-    description: 'Version label, resolved by fs-cli against the version name or number. Requires project-name (or a setup context carrying the project). Beats a version ID inherited from an upstream scan or upload; only an explicit version-id input takes precedence.'
+    description: 'Version label, resolved by fs-cli against the version name or number. Requires project-id or project-name (or a setup context carrying the project). Beats a version ID inherited from an upstream scan or upload; only an explicit version-id input takes precedence.'
     required: false
   format:
-    description: 'SBOM format: cyclonedx or spdx'
+    description: 'SBOM format: cyclonedx (alias cdx) or spdx. Case-insensitive; an unrecognized value fails the step rather than reaching fs-cli.'
     required: false
     default: 'cyclonedx'
+  max-size:
+    description: 'Reject an SBOM larger than this many MiB. Unset uses fs-cli default of 64. Raise it for a version whose SBOM exceeds that, which the REST path this replaced did not limit.'
+    required: false
   include-vex:
     description: 'Include VEX data in the SBOM export'
     required: false
@@ -49,7 +52,7 @@ outputs:
   artifact-name:
     description: 'Artifact name — set even when upload-artifact is false'
   component-count:
-    description: 'Number of entries in the SBOM — CycloneDX components or SPDX packages. 0 with a warning when the file cannot be parsed or carries neither array.'
+    description: 'Number of entries in the SBOM — CycloneDX components or SPDX packages. Not comparable across formats: SPDX usually counts the describing package too, CycloneDX omits metadata.component and nested components. 0 with a warning when the file cannot be parsed or carries neither array.'
 runs:
   using: 'node24'
   main: 'dist/index.js'

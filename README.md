@@ -233,10 +233,16 @@ pass `version-id` to `setup` or to `download-sbom` yourself, or pass `project-na
     version: v1.2.3
 ```
 
-An explicit input always wins over inherited context: a `version-id` you pass is the most
-specific locator, and a `version` label you pass beats a `FINITE_STATE_VERSION_ID` left by
-an upstream `scan` or `upload`. The inherited ID applies only when you pass neither, which
-is what lets `download-sbom` follow a `scan` with no inputs at all.
+An explicit input wins over inherited context: a `version-id` you pass is the most specific
+locator, and a `version` label you pass beats a `FINITE_STATE_VERSION_ID` left by an
+upstream `scan` or `upload`. The inherited ID applies only when you pass neither, which is
+what lets `download-sbom` follow a `scan` with no inputs at all.
+
+A project input is the one exception, because `project-id`/`project-name` cannot identify a
+version on their own. Pass one without `version` while an upstream step has exported a
+version ID and the export uses that ID — which may belong to a different project — and the
+step warns that the project input was ignored. Pass `version` alongside it to export by
+label. Every branch that drops an input you set says so in the log.
 
 `download-sbom` runs `fs-cli export` rather than calling the REST API directly, so from v2
 it needs `fs-cli`: it reuses one an earlier Finite State step put on `PATH`, and otherwise

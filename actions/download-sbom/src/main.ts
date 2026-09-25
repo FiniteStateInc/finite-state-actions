@@ -1,23 +1,32 @@
 import * as core from '@actions/core'
 import * as exec from '@actions/exec'
-import { mkdirSync, readFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync } from 'fs'
 import { dirname } from 'path'
 import { DefaultArtifactClient } from '@actions/artifact'
-import { FsClient, ensureFsCli, quoteExecPath, readSetupContext } from '@finite-state/core'
-import type { SbomFormat } from '@finite-state/core'
+import {
+  FsClient,
+  ensureFsCli,
+  normalizeSbomFormat,
+  quoteExecPath,
+  readSetupContext,
+} from '@finite-state/core'
 
 /**
  * Counts the entries in an SBOM document written by fs-cli.
  *
- * CycloneDX calls them `components`, SPDX calls them `packages` — reading only
- * the first reported 0 for every SPDX export. A document that cannot be read or
- * parsed is worth a warning, not a failed step: the file is already on disk and
- * the artifact upload still has to happen.
+ * CycloneDX calls them `components` and SPDX calls them `packages`; reading only
+ * the first reported 0 for every SPDX export. The two are not quite the same
+ * population either — SPDX usually includes the document's own describing
+ * package, CycloneDX excludes `metadata.component` and nested
+ * `components[].components` — so the count is a rough size signal, not a figure
+ * to compare across formats. That caveat is documented on the output.
  *
- * Reading the whole file to count is bounded by fs-cli itself, whose
- * `--max-size` rejects an SBOM over 64 MiB before it ever reaches disk.
+ * A document that is present but unreadable is worth a warning, not a failed
+ * step: the file is already on disk and the artifact upload still has to
+ * happen. A *missing* file is the caller's problem, not this function's, and is
+ * checked before the call — an exported SBOM that does not exist is a failure.
  *
- * A count of 0 is reported three ways on purpose: an unreadable file warns with
+ * A count of 0 is reported three ways on purpose: an unparseable file warns with
  * the parse error, a document carrying neither array warns that the shape was
  * not recognised, and a genuinely empty SBOM returns 0 silently. Without the
  * middle case a shape this function does not model is indistinguishable from an
@@ -29,19 +38,28 @@ function countComponents(file: string): number {
       components?: unknown[]
       packages?: unknown[]
     }
-    const entries = doc.components ?? doc.packages
-    if (!Array.isArray(entries)) {
-      core.warning(
-        `${file} parsed as JSON but carries neither a CycloneDX "components" nor an SPDX ` +
-          `"packages" array. Reporting 0 components; the exported file itself is unaffected.`,
-        { title: 'Component count unavailable' },
-      )
+    // Prefer whichever array actually carries entries: a merged or wrapped
+    // document can hold an empty `components` beside a populated `packages`,
+    // and `??` alone would report 0 for it.
+    const populated = [doc.components, doc.packages].find(
+      (entries) => Array.isArray(entries) && entries.length > 0,
+    )
+    if (Array.isArray(populated)) {
+      return populated.length
+    }
+    if (Array.isArray(doc.components) || Array.isArray(doc.packages)) {
       return 0
     }
-    return entries.length
+    core.warning(
+      `${file} parsed as JSON but carries neither a CycloneDX "components" nor an SPDX ` +
+        `"packages" array. Reporting 0 components; the exported file itself is unaffected.`,
+      { title: 'Component count unavailable' },
+    )
+    return 0
   } catch (err) {
     core.warning(
-      `Could not count components in ${file}: ${err instanceof Error ? err.message : String(err)}`,
+      `Could not count components in ${file}: ${err instanceof Error ? err.message : String(err)}. ` +
+        `If the export is not JSON this count does not apply; the file itself is unaffected.`,
       { title: 'Component count unavailable' },
     )
     return 0
@@ -55,7 +73,11 @@ export async function run(): Promise<void> {
     const projectIdInput = core.getInput('project-id') || undefined
     const projectNameInput = core.getInput('project-name') || undefined
     const version = core.getInput('version') || undefined
-    const format = (core.getInput('format') || 'cyclonedx') as SbomFormat
+    // Validated rather than cast, and through the same core helper `upload`
+    // uses, so `cdx` and `CycloneDX` mean here what they mean there instead of
+    // reaching fs-cli unmapped.
+    const format = normalizeSbomFormat(core.getInput('format') || 'cyclonedx')
+    const maxSize = core.getInput('max-size') || undefined
     const includeVex = core.getBooleanInput('include-vex')
     const outputFile = core.getInput('output-file') || 'sbom.json'
     const uploadArtifact = core.getBooleanInput('upload-artifact')
@@ -66,9 +88,16 @@ export async function run(): Promise<void> {
     // ── Read setup context, falling back to this action's own inputs ─────────
     // Running without the setup action is supported: pass api-token here, the
     // same way scan and upload accept it.
+    // Both project inputs go in, as `scan` and `upload` do, so `ctx` is the one
+    // place any later code reads the project from. The locator below still tests
+    // the raw inputs first and cannot be collapsed to read `ctx` alone:
+    // `readSetupContext` merges input over environment, which erases the
+    // distinction the precedence rule depends on — an explicit project-name has
+    // to beat an inherited project ID, and after the merge both are just set.
     const ctx = readSetupContext({
       apiToken: apiTokenInput,
       domain: domainInput,
+      projectId: projectIdInput,
       projectName: projectNameInput,
       versionId: versionIdInput,
     })
@@ -102,8 +131,26 @@ export async function run(): Promise<void> {
     // left in the environment, so it outranks the inherited ID. Only with
     // neither input does the inherited version ID apply — which is what makes
     // `scan` → `download-sbom` with no inputs work.
+    //
+    // Every branch that drops an input the caller set says so. The version-id
+    // branch is the one that most needs it: a mistaken version-id exports a
+    // different version entirely while the project and label inputs sitting
+    // beside it look like they applied.
     const locator: string[] = []
     if (versionIdInput) {
+      const shadowed = [
+        projectIdInput && 'project-id',
+        projectNameInput && 'project-name',
+        version && 'version',
+      ].filter((name): name is string => Boolean(name))
+      if (shadowed.length) {
+        core.warning(
+          `version-id ${versionIdInput} locates the version on its own, so ` +
+            `${shadowed.join(', ')} ${shadowed.length > 1 ? 'were' : 'was'} not used. Remove ` +
+            `version-id to export by ${shadowed.includes('version') ? 'label' : 'project'} instead.`,
+          { title: 'Locator inputs ignored' },
+        )
+      }
       locator.push('--version-id', versionIdInput)
     } else if (version) {
       // A label needs a project to resolve against, and falling through to the
@@ -112,8 +159,9 @@ export async function run(): Promise<void> {
       // precedence exists to prevent. Missing project, missing export.
       if (!project.length) {
         throw new Error(
-          `version "${version}" needs a project to resolve against. Pass project-name, or run ` +
-            'setup, scan or upload first so a project is inherited, or pass version-id instead.',
+          `version "${version}" needs a project to resolve against. Pass project-id or ` +
+            'project-name, or run setup, scan or upload first so a project is inherited, or ' +
+            'pass version-id instead.',
         )
       }
       locator.push(...project, '--version', version)
@@ -122,12 +170,15 @@ export async function run(): Promise<void> {
       // locator, so the inherited version ID is used instead — but that ID
       // carries its own project, which may not be the one just named. Say so
       // rather than dropping the input silently.
-      if (projectIdInput || projectNameInput) {
+      const given = [projectIdInput && 'project-id', projectNameInput && 'project-name'].filter(
+        (name): name is string => Boolean(name),
+      )
+      if (given.length) {
         core.warning(
-          `${projectIdInput ? 'project-id' : 'project-name'} was given without version, so it ` +
-            `cannot locate a version on its own. Exporting the inherited version ID ` +
-            `${ctx.versionId} instead, which may belong to a different project. Pass version to ` +
-            `export by label, or version-id to be explicit.`,
+          `${given.join(' and ')} ${given.length > 1 ? 'were' : 'was'} given without version, ` +
+            `so ${given.length > 1 ? 'they' : 'it'} cannot locate a version. Exporting the ` +
+            `inherited version ID ${ctx.versionId} instead, which may belong to a different ` +
+            `project. Pass version to export by label, or version-id to be explicit.`,
           { title: 'Project input ignored' },
         )
       }
@@ -163,8 +214,11 @@ export async function run(): Promise<void> {
     // `export` does not require `--name` alongside `--project-id` — its help is
     // explicit that `--project-id` and `--version-id` are there to skip the name
     // lookups — so the `--project-id` branch deliberately sends the ID alone.
-    // fs-cli also caps the response at `--max-size` (64 MiB by default), which
-    // is the bound countComponents relies on.
+    //
+    // `--max-size` is passed only when the `max-size` input is set. fs-cli caps
+    // the response at 64 MiB by default, which the REST path this replaced did
+    // not do, so a version whose SBOM exceeds that now needs the input raised —
+    // the reason it exists rather than being left to an unstated default.
     const outputDir = dirname(outputFile)
     if (outputDir && outputDir !== '.') {
       mkdirSync(outputDir, { recursive: true })
@@ -182,6 +236,7 @@ export async function run(): Promise<void> {
         '--format',
         format,
         `--include-vex=${includeVex}`,
+        ...(maxSize ? ['--max-size', maxSize] : []),
         '--output-file',
         outputFile,
         '--overwrite',
@@ -197,6 +252,17 @@ export async function run(): Promise<void> {
       // exit does not carry.
       throw new Error(
         `fs-cli export exited ${exitCode} on ${ctx.domain}. See the fs-cli output above.`,
+      )
+    }
+
+    // An exit-0 export that wrote nothing is a failure, not a warning. Left to
+    // countComponents it would surface as "component count unavailable" plus
+    // `component-count: 0` — which a gate reads as a clean SBOM — and then,
+    // only if upload-artifact is on, an opaque artifact error naming no cause.
+    if (!existsSync(outputFile)) {
+      throw new Error(
+        `fs-cli export reported success but wrote no file at ${outputFile}. ` +
+          'Check output-file and the fs-cli output above.',
       )
     }
 

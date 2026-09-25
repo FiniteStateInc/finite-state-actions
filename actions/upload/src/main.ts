@@ -4,6 +4,7 @@ import { glob } from 'fs/promises'
 import {
   FsClient,
   ensureFsCli,
+  normalizeSbomFormat,
   timeoutSecondsToMinutes,
   quoteExecPath,
   readSetupContext,
@@ -16,29 +17,25 @@ import type { SbomFormat } from '@finite-state/core'
 /** Types fs-cli's `upload` subcommand handles, in its own naming. */
 const BINARY_TYPES = new Set(['sca', 'sast', 'config', 'vulnerability_analysis'])
 
-/** SBOM formats fs-cli accepts, keyed by the aliases this action documents. */
-const SBOM_FORMATS: Record<string, string> = {
-  cdx: 'cyclonedx',
-  cyclonedx: 'cyclonedx',
-  spdx: 'spdx',
-}
-
 /**
  * Maps the `sbom-format` input to fs-cli's `--format`, or to nothing at all when
  * it was not set — fs-cli then detects the format from the file's contents.
+ *
+ * The alias map and its error live in core, shared with `download-sbom` so a
+ * spelling one action accepts cannot be an opaque fs-cli error in the other.
  */
 function sbomFormatArgs(sbomFormat?: SbomFormat): string[] {
   if (!sbomFormat) {
     return []
   }
-  const format = SBOM_FORMATS[sbomFormat.trim().toLowerCase()]
-  if (!format) {
-    throw new Error(
-      `sbom-format "${sbomFormat}" is not recognized. Valid: cdx (cyclonedx) or spdx. ` +
-        `Leave it unset to let fs-cli detect the format.`,
-    )
-  }
-  return ['--format', format]
+  return [
+    '--format',
+    normalizeSbomFormat(
+      sbomFormat,
+      'sbom-format',
+      'Leave it unset to let fs-cli detect the format.',
+    ),
+  ]
 }
 
 /** Our inputs use hyphens; fs-cli uses underscores. */

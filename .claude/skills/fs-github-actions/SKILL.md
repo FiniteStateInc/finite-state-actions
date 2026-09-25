@@ -554,28 +554,28 @@ Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
 **Inputs:**
 
 | Input             | Required | Default             | Description                                                                                                   |
-| ----------------- | -------- | ------------------- | ------------------------------------------------------------------------------------------------------------- |
+| ----------------- | -------- | ------------------- | ------------------------------------------------------------------------------------------------------------- | --- | ------------- | --- | ------ | ------------------------------- |
 | `api-token`       | no       | from setup          | FS API token. Required only when `setup`/`scan`/`upload` did not run                                          |
 | `domain`          | no       | from setup          | Platform domain. Falls back to setup context, then `app.finitestate.io`                                       |
 | `version-id`      | no       | from setup/upload   | Falls back to setup context or upload output. Skips the name lookups; outranks `project-name`/`version`       |
 | `project-id`      | no       | from setup          | Project UUID. Used with `version` when no version ID is known; skips the name lookup, outranks `project-name` |
 | `project-name`    | no       | from setup          | Project name, resolved by fs-cli. Used with `version` when no ID is known                                     |
 | `version`         | no       | —                   | Version label, resolved by fs-cli. Needs a project (input or inherited). Beats an _inherited_ version ID      |
-| `format`          | no       | `cyclonedx`         | `cyclonedx` or `spdx`                                                                                         |
-| `include-vex`     | no       | `true`              | Include VEX triage data in SBOM                                                                               |
+| `format`          | no       | `cyclonedx`         | `cyclonedx` (alias `cdx`) or `spdx`, case-insensitive. An unrecognized value fails the step                   |
+| `max-size`        | no       | fs-cli's 64 (MiB)   | Reject an SBOM larger than this many MiB. Raise it for a version whose SBOM exceeds 64 MiB                    |     | `include-vex` | no  | `true` | Include VEX triage data in SBOM |
 | `output-file`     | no       | `sbom.json`         | Output file path                                                                                              |
 | `upload-artifact` | no       | `true`              | Upload as workflow artifact                                                                                   |
 | `artifact-name`   | no       | `finite-state-sbom` | Artifact name                                                                                                 |
 
 **Outputs:**
 
-| Output            | Description                                                                                                                 |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `file`            | Path to the downloaded SBOM file                                                                                            |
-| `artifact-name`   | Artifact name — set even when `upload-artifact` is `false`                                                                  |
-| `component-count` | CycloneDX `components` or SPDX `packages` count. `0` with a warning when the file cannot be parsed or carries neither array |
+| Output            | Description                                                                                                                                                                                                                                                         |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `file`            | Path to the downloaded SBOM file                                                                                                                                                                                                                                    |
+| `artifact-name`   | Artifact name — set even when `upload-artifact` is `false`                                                                                                                                                                                                          |
+| `component-count` | CycloneDX `components` or SPDX `packages` count. Not comparable across formats — SPDX usually counts the describing package, CycloneDX omits `metadata.component` and nested components. `0` with a warning when the file cannot be parsed or carries neither array |
 
-**Behavior:** Runs `fs-cli export --format <format> --include-vex=<bool> --output-file <path> --overwrite`, going through `ensureFsCli` like `scan`, `upload` and `wait` — so it reuses an fs-cli an earlier step put on `PATH` and installs one when this is the first Finite State step in the job. fs-cli writes the document byte for byte, so the file keeps the formatting the platform produced rather than a re-serialised copy. The token is passed via `FS_TOKEN`, never on the command line. Auth comes from `api-token`/`domain` when given, otherwise from the env vars `setup`, `scan` or `upload` exported. Optionally uploads the file as a workflow artifact. The only REST call the action makes is the fs-cli download when the binary is not already on `PATH`.
+**Behavior:** Runs `fs-cli export --format <format> --include-vex=<bool> --output-file <path> --overwrite` (plus `--max-size` when that input is set), going through `ensureFsCli` like `scan`, `upload` and `wait` — so it reuses an fs-cli an earlier step put on `PATH` and installs one when this is the first Finite State step in the job. fs-cli writes the document byte for byte, so the file keeps the formatting the platform produced rather than a re-serialised copy. The token is passed via `FS_TOKEN`, never on the command line. Auth comes from `api-token`/`domain` when given, otherwise from the env vars `setup`, `scan` or `upload` exported. Optionally uploads the file as a workflow artifact. The only REST call the action makes is the fs-cli download when the binary is not already on `PATH`.
 
 **Example:**
 
@@ -591,6 +591,7 @@ Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
 
 - **`version-id` is a platform version ID, not a version label.** `v1.2.3` will not work; the ID is what `upload` returns as its `version-id` output. To export by label instead, pass `project-name` and `version` and let fs-cli resolve them — `version` is matched against the platform's version _name_ or _number_, the same as `query`.
 - **Explicit inputs beat inherited context.** A `version-id` input is the most specific locator; a `version` label you pass beats a `FINITE_STATE_VERSION_ID` exported by an upstream `scan` or `upload`. The inherited ID is used only when you pass neither, which is what makes `scan` → `download-sbom` work with no inputs.
+- **A very large SBOM needs `max-size` raised.** fs-cli rejects a response over 64 MiB by default, which the REST path this replaced did not do, so a version whose SBOM is bigger fails until you raise `max-size`. The number is in MiB.
 - **`download-sbom` needs `fs-cli` from v2 on.** It exports through `fs-cli export` instead of the REST API, reusing an `fs-cli` an earlier step put on `PATH` and downloading one from `GET /cli/download` otherwise. On an egress-restricted runner that permits the API but not the binary download, install `fs-cli` yourself before this step.
 - **An explicit project input beats an inherited project ID.** The two can name different projects, so when you pass `project-name` the action sends `--name` alone rather than letting fs-cli choose between them. `project-id` outranks `project-name` when both are given, because a UUID cannot be ambiguous.
 - **A project input needs `version` to locate anything.** `project-name`/`project-id` on their own cannot identify a version, so if an upstream step exported a version ID the action exports that instead and warns that the project input was ignored — the inherited ID may belong to a different project. Pass `version` to export by label. With no inherited ID either, the step fails.
@@ -647,8 +648,8 @@ download-sbom (reads env + setup/upload outputs)
 3. **run-report before quality-gate and pr-comment** -- both consume report outputs.
 4. **quality-gate before pr-comment** (optional) -- if you want gate results in the PR comment, run the gate first.
 5. **wait for the scan before download-sbom or run-report** -- `scan` and `upload` both return as soon as the upload is accepted. Use `wait-for-completion: true` on `upload`, or the `wait` action after `scan`.
-6. **download-sbom needs a version ID, or a name/version pair** -- `scan` and `upload` both output the platform's version ID and export it as `FINITE_STATE_VERSION_ID`, so either earlier in the job covers it. Otherwise pass `version-id` to `setup` or to `download-sbom`, or pass `project-name` and `version` and let fs-cli resolve the label.
-7. **`scan`, `upload` and `download-sbom` run without setup** -- all three accept `api-token`/`domain` and `project-name` directly, and all three download fs-cli when PATH has none. The other actions read auth from the env vars `setup` exports, though all of them accept explicit project/version inputs instead of upstream outputs.
+6. **download-sbom needs a version ID, or a name/version pair** -- `scan` and `upload` both output the platform's version ID and export it as `FINITE_STATE_VERSION_ID`, so either earlier in the job covers it. Otherwise pass `version-id` to `setup` or to `download-sbom`, or pass `project-id`/`project-name` together with `version` and let fs-cli resolve the label.
+7. **`scan`, `upload` and `download-sbom` run without setup** -- all three accept `api-token`/`domain` and `project-id`/`project-name` directly, and all three download fs-cli when PATH has none. The other actions read auth from the env vars `setup` exports, though all of them accept explicit project/version inputs instead of upstream outputs.
 8. **`scan` and `upload` export the full context too** -- both write the same `FINITE_STATE_*` env vars `setup` does, including `FINITE_STATE_PROJECT_ID` and `FINITE_STATE_VERSION_ID`, so a later step inherits everything without repeating it. Both read those two IDs back from fs-cli's own output, which is the only place the platform reports them. No other action exports anything.
 
 ### Referencing upstream outputs
