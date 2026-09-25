@@ -117150,6 +117150,13 @@ async function run() {
                 "Leave it unset to use fs-cli's default of 64.");
         }
         const maxSize = maxSizeInput;
+        // Seconds in, minutes out, through the same core helper upload and wait
+        // use, so the parsing and the rounding message cannot drift between them.
+        // Unset leaves fs-cli its own 15-minute default for export.
+        const { minutes: timeoutMinutes, warning: timeoutWarning } = (0, core_1.timeoutSecondsToMinutes)(core.getInput('timeout'));
+        if (timeoutWarning) {
+            core.warning(timeoutWarning, { title: 'Timeout rounded' });
+        }
         const includeVex = core.getBooleanInput('include-vex');
         const outputFile = core.getInput('output-file') || 'sbom.json';
         const uploadArtifact = core.getBooleanInput('upload-artifact');
@@ -117183,6 +117190,11 @@ async function run() {
         // name different projects, and sending both would leave fs-cli to pick. An
         // explicit project-id outranks an explicit project-name because an ID
         // identifies exactly one project, whereas a name can match several.
+        if (projectIdInput && projectNameInput) {
+            core.warning(`project-id ${projectIdInput} and project-name "${projectNameInput}" were both given. ` +
+                'Using project-id, which identifies exactly one project; project-name was not used. ' +
+                'Drop one of the two so the target is unambiguous.', { title: 'Project input ignored' });
+        }
         const project = projectIdInput
             ? ['--project-id', projectIdInput]
             : projectNameInput
@@ -117212,9 +117224,16 @@ async function run() {
                 version && 'version',
             ].filter((name) => Boolean(name));
             if (shadowed.length) {
+                // The advice has to match what removing version-id would actually do:
+                // with a version label present it exports by label, but a project input
+                // alone cannot locate a version, so it would fall back to the inherited
+                // ID or fail. Telling the operator otherwise costs a CI round-trip.
+                const advice = shadowed.includes('version')
+                    ? 'Remove version-id to export by label instead.'
+                    : 'A project input cannot locate a version on its own — add version to export by ' +
+                        'label, or drop the project input.';
                 core.warning(`version-id ${versionIdInput} locates the version on its own, so ` +
-                    `${shadowed.join(', ')} ${shadowed.length > 1 ? 'were' : 'was'} not used. Remove ` +
-                    `version-id to export by ${shadowed.includes('version') ? 'label' : 'project'} instead.`, { title: 'Locator inputs ignored' });
+                    `${shadowed.join(', ')} ${shadowed.length > 1 ? 'were' : 'was'} not used. ${advice}`, { title: 'Locator inputs ignored' });
             }
             locator.push('--version-id', versionIdInput);
         }
@@ -117305,6 +117324,7 @@ async function run() {
             format,
             `--include-vex=${includeVex}`,
             ...(maxSize ? ['--max-size', maxSize] : []),
+            ...(timeoutMinutes ? ['--timeout', String(timeoutMinutes)] : []),
             '--output-file',
             outputFile,
             '--overwrite',
@@ -117315,7 +117335,10 @@ async function run() {
         if (exitCode !== 0) {
             // fs-cli has already printed why; this adds the context a bare non-zero
             // exit does not carry.
-            throw new Error(`fs-cli export exited ${exitCode} on ${ctx.domain}. See the fs-cli output above.`);
+            throw new Error(`fs-cli export exited ${exitCode} on ${ctx.domain}. See the fs-cli output above. ` +
+                'If it reports an unknown command or flag, the fs-cli on PATH predates the export ' +
+                'surface this action uses (verified against v2.3.35) — let this action install its ' +
+                'own by removing the older binary from PATH.');
         }
         // An exit-0 export that produced no usable bytes is a failure, not a
         // warning. Left to countComponents it would surface as "component count
@@ -117328,15 +117351,26 @@ async function run() {
                 'Check output-file and the fs-cli output above.');
         }
         // Read once, then count from the contents: a second read purely to count
-        // would load the document twice.
-        const contents = (0, fs_1.readFileSync)(outputFile, 'utf8');
-        if (!contents.trim()) {
+        // would load the document twice. The read is isolated like the parse it
+        // feeds — a document too large for Node to hold as a string throws here,
+        // and failing the step then would lose an SBOM that exported successfully
+        // and is sitting on disk ready to upload.
+        let contents;
+        try {
+            contents = (0, fs_1.readFileSync)(outputFile, 'utf8');
+        }
+        catch (err) {
+            core.warning(`Could not read ${outputFile} to count components: ` +
+                `${err instanceof Error ? err.message : String(err)}. Reporting 0; the exported file ` +
+                `itself is unaffected and is still uploaded.`, { title: 'Component count unavailable' });
+        }
+        if (contents !== undefined && !contents.trim()) {
             throw new Error(`fs-cli export reported success but wrote an empty file at ${outputFile}. ` +
                 'See the fs-cli output above.');
         }
         core.info(`SBOM written to ${outputFile}`);
         // ── Set outputs ──────────────────────────────────────────────────────────
-        const componentCount = countComponents(contents, outputFile, format);
+        const componentCount = contents === undefined ? 0 : countComponents(contents, outputFile, format);
         core.setOutput('file', outputFile);
         core.setOutput('component-count', String(componentCount));
         core.setOutput('artifact-name', artifactName);

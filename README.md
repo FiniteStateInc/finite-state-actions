@@ -220,9 +220,10 @@ jobs:
           artifact-name: 'sbom-${{ github.ref_name }}'
 ```
 
-`download-sbom` needs a version ID. `scan` and `upload` both output one and export it as
-`FINITE_STATE_VERSION_ID`, so a `scan` or `upload` earlier in the job covers it. Otherwise
-pass `version-id` to `setup` or to `download-sbom` yourself, or pass `project-name` and
+`download-sbom` needs a project version to export, identified either by ID or by label.
+`scan` and `upload` both output a version ID and export it as `FINITE_STATE_VERSION_ID`, so
+a `scan` or `upload` earlier in the job covers it. Otherwise pass `version-id` to `setup` or
+to `download-sbom` yourself, or pass a project (`project-id` or `project-name`) with
 `version` and let `fs-cli` resolve the label:
 
 ```yaml

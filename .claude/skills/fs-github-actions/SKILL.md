@@ -563,6 +563,7 @@ Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
 | `version`         | no       | —                   | Version label, resolved by fs-cli. Needs a project (input or inherited). Beats an _inherited_ version ID                                                 |
 | `format`          | no       | `cyclonedx`         | `cyclonedx` (alias `cdx`) or `spdx`, case-insensitive. An unrecognized value fails the step                                                              |
 | `max-size`        | no       | fs-cli's 64 (MiB)   | Reject an SBOM larger than this many MiB. Raise it for a version whose SBOM exceeds 64 MiB                                                               |
+| `timeout`         | no       | fs-cli's 15 (min)   | Maximum wait in **seconds** for the export, rounded up to whole minutes for fs-cli                                                                       |
 | `include-vex`     | no       | `true`              | Include VEX triage data in SBOM                                                                                                                          |
 | `output-file`     | no       | `sbom.json`         | Output file path                                                                                                                                         |
 | `upload-artifact` | no       | `true`              | Upload as workflow artifact                                                                                                                              |
@@ -576,7 +577,7 @@ Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
 | `artifact-name`   | Artifact name — set even when `upload-artifact` is `false`                                                                                                                                                                                                          |
 | `component-count` | CycloneDX `components` or SPDX `packages` count. Not comparable across formats — SPDX usually counts the describing package, CycloneDX omits `metadata.component` and nested components. `0` with a warning when the file cannot be parsed or carries neither array |
 
-**Behavior:** Runs `fs-cli export --format <format> --include-vex=<bool> --output-file <path> --overwrite` (plus `--max-size` when that input is set), going through `ensureFsCli` like `scan`, `upload` and `wait` — so it reuses an fs-cli an earlier step put on `PATH` and installs one when this is the first Finite State step in the job. fs-cli writes the document byte for byte, so the file keeps the formatting the platform produced rather than a re-serialised copy. The token is passed via `FS_TOKEN`, never on the command line. Auth comes from `api-token`/`domain` when given, otherwise from the env vars `setup`, `scan` or `upload` exported. Optionally uploads the file as a workflow artifact. The only REST call the action makes is the fs-cli download when the binary is not already on `PATH`.
+**Behavior:** Runs `fs-cli export --format <format> --include-vex=<bool> --output-file <path> --overwrite` (plus `--max-size` and `--timeout` when those inputs are set), going through `ensureFsCli` like `scan`, `upload` and `wait` — so it reuses an fs-cli an earlier step put on `PATH` and installs one when this is the first Finite State step in the job. fs-cli writes the document byte for byte, so the file keeps the formatting the platform produced rather than a re-serialised copy. The token is passed via `FS_TOKEN`, never on the command line. Auth comes from `api-token`/`domain` when given, otherwise from the env vars `setup`, `scan` or `upload` exported. Optionally uploads the file as a workflow artifact. The only REST call the action makes is the fs-cli download when the binary is not already on `PATH`.
 
 **Example:**
 
@@ -639,6 +640,7 @@ run-report (reads env + setup/upload outputs)
   |
   v
 download-sbom (reads env + setup/upload outputs)
+  |-- installs fs-cli when no earlier step put one on PATH
   |-- outputs: file, artifact-name, component-count
 ```
 
@@ -993,11 +995,12 @@ jobs:
 
 ### Network and proxy failures
 
-| Symptom                                                | Cause                                                           | Fix                                                                                                             |
-| ------------------------------------------------------ | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `Could not install fs-cli from <domain>: fetch failed` | Runner cannot reach the platform: proxy, DNS, or blocked egress | Set `HTTPS_PROXY`/`NO_PROXY` on the job; allowlist the platform domain **and** the pre-signed storage host      |
-| `setup` fails but a `scan` step with `api-token` works | `scan` reuses an fs-cli already on PATH, so it never downloads  | Same fix — `setup` always downloads, so it is the first step to hit an egress block                             |
-| `FS_SKIP_UPDATE=1` does not skip the download          | That variable belongs to fs-cli; no action reads it             | There is no skip flag — fix the network path, or drop `setup` and set the `FINITE_STATE_*` variables on the job |
+| Symptom                                                                          | Cause                                                                                                           | Fix                                                                                                                          |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `Could not install fs-cli from <domain>: fetch failed`                           | Runner cannot reach the platform: proxy, DNS, or blocked egress                                                 | Set `HTTPS_PROXY`/`NO_PROXY` on the job; allowlist the platform domain **and** the pre-signed storage host                   |
+| `setup` fails but a `scan` step with `api-token` works                           | `scan` reuses an fs-cli already on PATH, so it never downloads                                                  | Same fix — `setup` always downloads, so it is the first step to hit an egress block                                          |
+| `FS_SKIP_UPDATE=1` does not skip the download                                    | That variable belongs to fs-cli; no action reads it                                                             | There is no skip flag — fix the network path, or drop `setup` and set the `FINITE_STATE_*` variables on the job              |
+| A `download-sbom`-only job starts failing at `ensureFsCli` after retagging `@v2` | From v2 it exports through `fs-cli` instead of the REST API, so it needs `GET /cli/download` as well as the API | Allowlist the download endpoint and the pre-signed storage host, or put a matching native `fs-cli` on `PATH` before the step |
 
 To find the second host, run the download endpoint by hand and read `download_url`:
 

@@ -52,6 +52,7 @@ vi.mock('@finite-state/core', async () => {
   // does: format validation is the behaviour under test in the format cases, so
   // a stub would assert nothing and could drift from core.
   const { normalizeSbomFormat } = await import('../../../packages/core/src/sbom-format')
+  const { timeoutSecondsToMinutes } = await import('../../../packages/core/src/timeout')
   // quoteExecPath comes from source too: a stubbed quoting rule would assert
   // nothing about the Windows path splitting it exists to prevent.
   const { quoteExecPath } = await import('../../../packages/core/src/exec-path')
@@ -61,6 +62,7 @@ vi.mock('@finite-state/core', async () => {
     quoteExecPath,
     readSetupContext: vi.fn(),
     normalizeSbomFormat,
+    timeoutSecondsToMinutes,
   }
 })
 
@@ -234,6 +236,98 @@ describe('download-sbom action', () => {
     expect(mockRmSync.mock.invocationCallOrder[0]).toBeLessThan(
       mockExec.mock.invocationCallOrder[0],
     )
+  })
+
+  // The read feeds the count, so it is isolated like the parse: a document too
+  // large for Node to hold as a string must not lose an SBOM that exported
+  // successfully and is sitting on disk ready to upload.
+  it('warns and still uploads when the written SBOM cannot be read', async () => {
+    mockReadFileSync.mockImplementation(() => {
+      throw new Error('Cannot create a string longer than 0x1fffffe8 characters')
+    })
+
+    await run()
+
+    expect(core.warning).toHaveBeenCalledWith(
+      expect.stringContaining('Could not read'),
+      expect.objectContaining({ title: 'Component count unavailable' }),
+    )
+    expect(core.setOutput).toHaveBeenCalledWith('component-count', '0')
+    expect(mockUploadArtifact).toHaveBeenCalled()
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('passes --timeout in whole minutes when the seconds input is set', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = { timeout: '600', 'output-file': 'sbom.json' }
+      return inputs[name] ?? ''
+    })
+
+    await run()
+
+    expect(fsCliArgs()).toEqual(expect.arrayContaining(['--timeout', '10']))
+  })
+
+  it('omits --timeout when the input is unset', async () => {
+    await run()
+
+    expect(fsCliArgs()).not.toContain('--timeout')
+  })
+
+  // Removing version-id when only a project input was shadowed does NOT export
+  // by project, so the warning must not say it does.
+  it('does not advise exporting by project when only a project input was shadowed', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        'version-id': 'ver-explicit',
+        'project-name': 'my-app',
+        'output-file': 'sbom.json',
+      }
+      return inputs[name] ?? ''
+    })
+    vi.mocked(readSetupContext).mockReturnValue({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      versionId: 'ver-explicit',
+    })
+
+    await run()
+
+    const [message] = vi.mocked(core.warning).mock.calls[0]
+    expect(message).toContain('cannot locate a version on its own')
+    expect(message).not.toContain('export by project instead')
+  })
+
+  it('warns when project-id and project-name are both given', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        'project-id': 'proj-explicit',
+        'project-name': 'other-app',
+        version: '1.2.3',
+        'output-file': 'sbom.json',
+      }
+      return inputs[name] ?? ''
+    })
+    vi.mocked(readSetupContext).mockReturnValue({
+      apiToken: 'test-token',
+      domain: 'app.finitestate.io',
+      versionId: undefined,
+    })
+
+    await run()
+
+    expect(core.warning).toHaveBeenCalledWith(
+      expect.stringContaining('project-name was not used'),
+      expect.objectContaining({ title: 'Project input ignored' }),
+    )
+  })
+
+  it('names an outdated fs-cli as a possible cause of a non-zero export', async () => {
+    mockExec.mockResolvedValue(101)
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('predates the export'))
   })
 
   // The requested format decides which key to count, so a document carrying

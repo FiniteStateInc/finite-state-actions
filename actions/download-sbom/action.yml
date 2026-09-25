@@ -30,6 +30,9 @@ inputs:
   max-size:
     description: 'Reject an SBOM larger than this many MiB. Unset uses fs-cli default of 64. Raise it for a version whose SBOM exceeds that, which the REST path this replaced did not limit.'
     required: false
+  timeout:
+    description: 'Optional maximum wait in seconds for the export, rounded up to whole minutes for fs-cli. Unset leaves fs-cli its own 15-minute default.'
+    required: false
   include-vex:
     description: 'Include VEX data in the SBOM export'
     required: false
