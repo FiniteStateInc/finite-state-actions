@@ -10,7 +10,6 @@ import {
   readSetupContext,
   writeSetupContext,
 } from '@finite-state/core'
-import type { SbomFormat } from '@finite-state/core'
 
 // ── Scan-type routing ─────────────────────────────────────────────────────────
 
@@ -23,8 +22,10 @@ const BINARY_TYPES = new Set(['sca', 'sast', 'config', 'vulnerability_analysis']
  *
  * The alias map and its error live in core, shared with `download-sbom` so a
  * spelling one action accepts cannot be an opaque fs-cli error in the other.
+ * The parameter is a plain string: casting the raw input to `SbomFormat` would
+ * have the type claim a validation that only happens here, at runtime.
  */
-function sbomFormatArgs(sbomFormat?: SbomFormat): string[] {
+function sbomFormatArgs(sbomFormat?: string): string[] {
   if (!sbomFormat) {
     return []
   }
@@ -222,7 +223,7 @@ function buildFsCliArgs(opts: {
   file: string
   locator: string[]
   scannerType?: string
-  sbomFormat?: SbomFormat
+  sbomFormat?: string
   timeoutMinutes?: number
 }): string[] {
   const { types, file, locator } = opts
@@ -291,7 +292,7 @@ export async function run(): Promise<void> {
     const versionName = core.getInput('version') || undefined
     const versionIdInput = core.getInput('version-id') || undefined
     const scannerType = core.getInput('scanner-type') || undefined
-    const sbomFormat = (core.getInput('sbom-format') || undefined) as SbomFormat | undefined
+    const sbomFormat = core.getInput('sbom-format') || undefined
     const waitForCompletion = core.getBooleanInput('wait-for-completion')
 
     // timeout is optional: unset means fs-cli's own defaults (30 minutes for
