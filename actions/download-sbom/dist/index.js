@@ -117085,11 +117085,13 @@ const core_1 = __nccwpck_require__(82950);
  * Counts the entries in an SBOM document written by fs-cli.
  *
  * CycloneDX calls them `components` and SPDX calls them `packages`; reading only
- * the first reported 0 for every SPDX export. The two are not quite the same
- * population either — SPDX usually includes the document's own describing
- * package, CycloneDX excludes `metadata.component` and nested
- * `components[].components` — so the count is a rough size signal, not a figure
- * to compare across formats. That caveat is documented on the output.
+ * the first reported 0 for every SPDX export. The requested format picks the key
+ * and the other is a fallback, so a document holding both is counted by the one
+ * that was actually asked for. The two are not quite the same population either
+ * — SPDX usually includes the document's own describing package, CycloneDX
+ * excludes `metadata.component` and nested `components[].components` — so the
+ * count is a rough size signal, not a figure to compare across formats. That
+ * caveat is documented on the output.
  *
  * A document that is present but unreadable is worth a warning, not a failed
  * step: the file is already on disk and the artifact upload still has to
@@ -117103,13 +117105,16 @@ const core_1 = __nccwpck_require__(82950);
  * middle case a shape this function does not model is indistinguishable from an
  * SBOM with no components, and `component-count` is what downstream gates read.
  */
-function countComponents(contents, file) {
+function countComponents(contents, file, format) {
     try {
         const doc = JSON.parse(contents);
-        // Prefer whichever array actually carries entries: a merged or wrapped
-        // document can hold an empty `components` beside a populated `packages`,
-        // and `??` alone would report 0 for it.
-        const populated = [doc.components, doc.packages].find((entries) => Array.isArray(entries) && entries.length > 0);
+        // The requested format decides which key to read, so a document carrying
+        // both non-empty arrays is not a guess: an SPDX export is counted by
+        // `packages` even though `components` is also present. The other key is the
+        // fallback, which covers a platform that answers in the sibling format and
+        // a merged or wrapped document with one of the two empty.
+        const [preferred, fallback] = format === 'spdx' ? [doc.packages, doc.components] : [doc.components, doc.packages];
+        const populated = [preferred, fallback].find((entries) => Array.isArray(entries) && entries.length > 0);
         if (Array.isArray(populated)) {
             return populated.length;
         }
@@ -117137,7 +117142,14 @@ async function run() {
         // uses, so `cdx` and `CycloneDX` mean here what they mean there instead of
         // reaching fs-cli unmapped.
         const format = (0, core_1.normalizeSbomFormat)(core.getInput('format') || 'cyclonedx');
-        const maxSize = core.getInput('max-size') || undefined;
+        // Validated here rather than left to fs-cli, which reports a bad value as a
+        // generic non-zero exit. MiB, so a whole number above zero.
+        const maxSizeInput = core.getInput('max-size') || undefined;
+        if (maxSizeInput !== undefined && !/^[1-9][0-9]*$/.test(maxSizeInput)) {
+            throw new Error(`max-size "${maxSizeInput}" is not a whole number of MiB above zero. ` +
+                "Leave it unset to use fs-cli's default of 64.");
+        }
+        const maxSize = maxSizeInput;
         const includeVex = core.getBooleanInput('include-vex');
         const outputFile = core.getInput('output-file') || 'sbom.json';
         const uploadArtifact = core.getBooleanInput('upload-artifact');
@@ -117169,8 +117181,8 @@ async function run() {
         //
         // Either explicit project input wins over inherited context: the two can
         // name different projects, and sending both would leave fs-cli to pick. An
-        // explicit project-id outranks an explicit project-name because a UUID
-        // cannot be ambiguous, whereas a name can match several projects.
+        // explicit project-id outranks an explicit project-name because an ID
+        // identifies exactly one project, whereas a name can match several.
         const project = projectIdInput
             ? ['--project-id', projectIdInput]
             : projectNameInput
@@ -117215,6 +117227,14 @@ async function run() {
                 throw new Error(`version "${version}" needs a project to resolve against. Pass project-id or ` +
                     'project-name, or run setup, scan or upload first so a project is inherited, or ' +
                     'pass version-id instead.');
+            }
+            // Logged, not warned: unlike the branches below, nothing the caller set
+            // is being discarded here — the label is used, exactly as documented. But
+            // an inherited ID that looks like it still governs is worth one line in
+            // the log for anyone reconciling which version came out.
+            if (ctx.versionId) {
+                core.info(`Exporting version "${version}" by label; the inherited version ID ` +
+                    `${ctx.versionId} is outranked by it.`);
             }
             locator.push(...project, '--version', version);
         }
@@ -117269,6 +117289,12 @@ async function run() {
         if (outputDir && outputDir !== '.') {
             (0, fs_1.mkdirSync)(outputDir, { recursive: true });
         }
+        // Clear the destination first, so the checks after the export are actually
+        // about this export. A re-run in the same job, or a reused self-hosted
+        // workspace, can leave a previous version's SBOM at this path — and an
+        // exit-0 run that wrote nothing would then publish that stale document, and
+        // its component count, as the version just asked for.
+        (0, fs_1.rmSync)(outputFile, { force: true });
         core.info(`Exporting ${format} SBOM to ${outputFile} (includeVex=${includeVex})...`);
         const exitCode = await exec.exec((0, core_1.quoteExecPath)(fsCli), [
             'export',
@@ -117310,7 +117336,7 @@ async function run() {
         }
         core.info(`SBOM written to ${outputFile}`);
         // ── Set outputs ──────────────────────────────────────────────────────────
-        const componentCount = countComponents(contents, outputFile);
+        const componentCount = countComponents(contents, outputFile, format);
         core.setOutput('file', outputFile);
         core.setOutput('component-count', String(componentCount));
         core.setOutput('artifact-name', artifactName);

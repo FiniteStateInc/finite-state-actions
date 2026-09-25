@@ -36,10 +36,13 @@ const mockReadFileSync = vi.fn()
 
 const mockExistsSync = vi.fn(() => true)
 
+const mockRmSync = vi.fn()
+
 vi.mock('fs', () => ({
   mkdirSync: vi.fn(),
   readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
   existsSync: (...args: unknown[]) => mockExistsSync(...args),
+  rmSync: (...args: unknown[]) => mockRmSync(...args),
 }))
 
 // ── Mock @finite-state/core ────────────────────────────────────────────────────
@@ -216,6 +219,86 @@ describe('download-sbom action', () => {
     await run()
 
     expect(core.setOutput).toHaveBeenCalledWith('component-count', '0')
+    expect(core.warning).not.toHaveBeenCalled()
+  })
+
+  // A re-run in the same job, or a reused self-hosted workspace, can leave a
+  // previous version's SBOM at this path. Without clearing it first, an exit-0
+  // run that wrote nothing would pass both post-export checks and publish the
+  // stale document as the version just requested.
+  it('clears the destination before exporting', async () => {
+    await run()
+
+    expect(mockRmSync).toHaveBeenCalledWith('sbom.json', { force: true })
+    // Before fs-cli runs, not after it writes.
+    expect(mockRmSync.mock.invocationCallOrder[0]).toBeLessThan(
+      mockExec.mock.invocationCallOrder[0],
+    )
+  })
+
+  // The requested format decides which key to count, so a document carrying
+  // both is not a coin toss.
+  it('counts packages for an spdx export even when components is also present', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = { format: 'spdx', 'output-file': 'sbom.json' }
+      return inputs[name] ?? ''
+    })
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({
+        components: [{ name: 'only-one' }],
+        packages: [{ name: 'a' }, { name: 'b' }, { name: 'c' }],
+      }),
+    )
+
+    await run()
+
+    expect(core.setOutput).toHaveBeenCalledWith('component-count', '3')
+  })
+
+  it('counts components for a cyclonedx export even when packages is also present', async () => {
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({
+        components: [{ name: 'a' }, { name: 'b' }],
+        packages: [{ name: 'x' }, { name: 'y' }, { name: 'z' }],
+      }),
+    )
+
+    await run()
+
+    expect(core.setOutput).toHaveBeenCalledWith('component-count', '2')
+  })
+
+  it.each([['64.5'], ['-1'], ['abc'], ['0']])(
+    'fails on max-size %s rather than letting fs-cli report it',
+    async (value) => {
+      vi.mocked(core.getInput).mockImplementation((name: string) => {
+        const inputs: Record<string, string> = { 'max-size': value, 'output-file': 'sbom.json' }
+        return inputs[name] ?? ''
+      })
+
+      await run()
+
+      expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('max-size'))
+      expect(mockExec).not.toHaveBeenCalled()
+    },
+  )
+
+  // The label is used as documented, so this is a log line rather than an
+  // annotation — but it must not be silent, or an operator cannot tell which
+  // version came out.
+  it('logs that an explicit version label outranked an inherited version ID', async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        'project-name': 'my-app',
+        version: '1.2.3',
+        'output-file': 'sbom.json',
+      }
+      return inputs[name] ?? ''
+    })
+
+    await run()
+
+    expect(core.info).toHaveBeenCalledWith(expect.stringContaining('outranked'))
     expect(core.warning).not.toHaveBeenCalled()
   })
 
