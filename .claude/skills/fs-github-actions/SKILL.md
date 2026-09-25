@@ -553,16 +553,18 @@ Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
 
 **Inputs:**
 
-| Input             | Required | Default             | Description                                                             |
-| ----------------- | -------- | ------------------- | ----------------------------------------------------------------------- |
-| `api-token`       | no       | from setup          | FS API token. Required only when `setup`/`scan`/`upload` did not run    |
-| `domain`          | no       | from setup          | Platform domain. Falls back to setup context, then `app.finitestate.io` |
-| `version-id`      | no       | from setup/upload   | Falls back to setup context or upload output                            |
-| `format`          | no       | `cyclonedx`         | `cyclonedx` or `spdx`                                                   |
-| `include-vex`     | no       | `true`              | Include VEX triage data in SBOM                                         |
-| `output-file`     | no       | `sbom.json`         | Output file path                                                        |
-| `upload-artifact` | no       | `true`              | Upload as workflow artifact                                             |
-| `artifact-name`   | no       | `finite-state-sbom` | Artifact name                                                           |
+| Input             | Required | Default             | Description                                                                                                  |
+| ----------------- | -------- | ------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `api-token`       | no       | from setup          | FS API token. Required only when `setup`/`scan`/`upload` did not run                                         |
+| `domain`          | no       | from setup          | Platform domain. Falls back to setup context, then `app.finitestate.io`                                      |
+| `version-id`      | no       | from setup/upload   | Falls back to setup context or upload output. Skips the name lookups                                         |
+| `project-name`    | no       | from setup          | Project name, resolved by fs-cli. Used with `version` when no ID is known                                    |
+| `version`         | no       | —                   | Version label, resolved by fs-cli. Needs `project-name` or a setup project. Ignored when `version-id` is set |
+| `format`          | no       | `cyclonedx`         | `cyclonedx` or `spdx`                                                                                        |
+| `include-vex`     | no       | `true`              | Include VEX triage data in SBOM                                                                              |
+| `output-file`     | no       | `sbom.json`         | Output file path                                                                                             |
+| `upload-artifact` | no       | `true`              | Upload as workflow artifact                                                                                  |
+| `artifact-name`   | no       | `finite-state-sbom` | Artifact name                                                                                                |
 
 **Outputs:**
 
@@ -572,7 +574,7 @@ Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
 | `artifact-name`   | Artifact name — set even when `upload-artifact` is `false` |
 | `component-count` | Number of components in the SBOM                           |
 
-**Behavior:** Calls `GET /sboms/cyclonedx/{pvId}` or `GET /sboms/spdx/{pvId}`. Auth comes from `api-token`/`domain` when given, otherwise from the env vars `setup`, `scan` or `upload` exported. Writes to output file. Optionally uploads as workflow artifact. This is the one action that calls the API directly (not through fs-report) since fs-report does not handle SBOM export.
+**Behavior:** Runs `fs-cli export --format <format> --include-vex=<bool> --output-file <path> --overwrite`, going through `ensureFsCli` like `scan`, `upload` and `wait` — so it reuses an fs-cli an earlier step put on `PATH` and installs one when this is the first Finite State step in the job. fs-cli writes the document byte for byte, so the file keeps the formatting the platform produced rather than a re-serialised copy. The token is passed via `FS_TOKEN`, never on the command line. Auth comes from `api-token`/`domain` when given, otherwise from the env vars `setup`, `scan` or `upload` exported. Optionally uploads the file as a workflow artifact. The only REST call the action makes is the fs-cli download when the binary is not already on `PATH`.
 
 **Example:**
 
@@ -586,7 +588,9 @@ Exports the FS-generated SBOM back into the workflow as a file and/or artifact.
 
 **Gotchas:**
 
-- **`version-id` is a platform version ID, not a version label.** `v1.2.3` will not work; the ID is what `upload` returns as its `version-id` output.
+- **`version-id` is a platform version ID, not a version label.** `v1.2.3` will not work; the ID is what `upload` returns as its `version-id` output. To export by label instead, pass `project-name` and `version` and let fs-cli resolve them — `version` is matched against the platform's version _name_ or _number_, the same as `query`.
+- **`version-id` wins over `project-name`/`version`.** After a `scan` or `upload` in the same job, `FINITE_STATE_VERSION_ID` is set and the `version` input is ignored. Pass `version-id: ''` is not enough — the env var is still read; run the export in a job that has no upstream scan, or pass the ID you actually want.
+- **An explicit `project-name` beats an inherited project ID.** The two can name different projects, so when you pass `project-name` the action sends `--name` alone rather than letting fs-cli choose between them.
 - **A `scan`-only workflow gets its version ID from `scan`.** `scan` reads the ID back from fs-cli's output and exports it, so `download-sbom` needs no `version-id` input after a `scan` in the same job. When fs-cli prints no ID (an interrupted scan, an older fs-cli), `scan` warns and you have to pass `version-id` yourself.
 - **The scan has to finish first, and neither `scan` nor a default `upload` waits for it.** Both return once the platform accepts the files and analyse them in the background, so an export placed straight after either one returns a partial SBOM — typically no findings and no VEX data, with no error to tell you. After `upload`, set `wait-for-completion: true`. After `scan`, add the `wait` action, which needs no inputs.
 
@@ -640,8 +644,8 @@ download-sbom (reads env + setup/upload outputs)
 3. **run-report before quality-gate and pr-comment** -- both consume report outputs.
 4. **quality-gate before pr-comment** (optional) -- if you want gate results in the PR comment, run the gate first.
 5. **wait for the scan before download-sbom or run-report** -- `scan` and `upload` both return as soon as the upload is accepted. Use `wait-for-completion: true` on `upload`, or the `wait` action after `scan`.
-6. **download-sbom needs a version ID** -- the platform's version ID, not a version label like `v1.2.3`. `scan` and `upload` both output one and export it as `FINITE_STATE_VERSION_ID`, so a `scan` or `upload` earlier in the job covers it. Otherwise pass `version-id` to `setup` or to `download-sbom`.
-7. **`scan`, `upload` and `download-sbom` run without setup** -- all three accept `api-token`/`domain` directly (`scan` and `upload` also take `project-name`), and `scan`/`upload` download fs-cli when PATH has none. The other actions read auth from the env vars `setup` exports, though all of them accept explicit project/version inputs instead of upstream outputs.
+6. **download-sbom needs a version ID, or a name/version pair** -- `scan` and `upload` both output the platform's version ID and export it as `FINITE_STATE_VERSION_ID`, so either earlier in the job covers it. Otherwise pass `version-id` to `setup` or to `download-sbom`, or pass `project-name` and `version` and let fs-cli resolve the label.
+7. **`scan`, `upload` and `download-sbom` run without setup** -- all three accept `api-token`/`domain` and `project-name` directly, and all three download fs-cli when PATH has none. The other actions read auth from the env vars `setup` exports, though all of them accept explicit project/version inputs instead of upstream outputs.
 8. **`scan` and `upload` export the full context too** -- both write the same `FINITE_STATE_*` env vars `setup` does, including `FINITE_STATE_PROJECT_ID` and `FINITE_STATE_VERSION_ID`, so a later step inherits everything without repeating it. Both read those two IDs back from fs-cli's own output, which is the only place the platform reports them. No other action exports anything.
 
 ### Referencing upstream outputs
@@ -1113,12 +1117,12 @@ Commit a scoring YAML (same format as fs-report's `--scoring-file`) and pass it 
 
 ## Cross-References
 
-| Skill                 | Relationship                                                                                                                                                                                                                                                            |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **fs-api**            | The REST API. Most work now goes through `fs-cli` instead: `setup` only calls `/cli/download` (plus a project-name lookup), `scan` and `upload` only `/cli/download`, and `download-sbom` calls `/sboms`. See fs-api for endpoint details, pagination, and error codes. |
-| **fs-report-cli**     | The CLI tool that `run-report` wraps. All recipe execution, output formats, and scoring configuration are fs-report features. See fs-report-cli for CLI flags, output structure, and caching.                                                                           |
-| **fs-report-recipes** | The recipe catalog available in `run-report`. Each recipe has specific inputs, outputs, and use cases. See fs-report-recipes for recipe details, output files, and combination patterns.                                                                                |
-| **fs-platform**       | Platform concepts (organizations, projects, versions, findings, VEX). Understanding the data model helps configure actions correctly. See fs-platform for hierarchy, finding lifecycle, and triage workflows.                                                           |
+| Skill                 | Relationship                                                                                                                                                                                                                                             |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **fs-api**            | The REST API. Most work now goes through `fs-cli` instead: `setup` only calls `/cli/download` (plus a project-name lookup), and `scan`, `upload` and `download-sbom` only `/cli/download`. See fs-api for endpoint details, pagination, and error codes. |
+| **fs-report-cli**     | The CLI tool that `run-report` wraps. All recipe execution, output formats, and scoring configuration are fs-report features. See fs-report-cli for CLI flags, output structure, and caching.                                                            |
+| **fs-report-recipes** | The recipe catalog available in `run-report`. Each recipe has specific inputs, outputs, and use cases. See fs-report-recipes for recipe details, output files, and combination patterns.                                                                 |
+| **fs-platform**       | Platform concepts (organizations, projects, versions, findings, VEX). Understanding the data model helps configure actions correctly. See fs-platform for hierarchy, finding lifecycle, and triage workflows.                                            |
 
 ### Forge MCP tool connections
 

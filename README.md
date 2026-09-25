@@ -222,7 +222,19 @@ jobs:
 
 `download-sbom` needs a version ID. `scan` and `upload` both output one and export it as
 `FINITE_STATE_VERSION_ID`, so a `scan` or `upload` earlier in the job covers it. Otherwise
-pass `version-id` to `setup` or to `download-sbom` yourself.
+pass `version-id` to `setup` or to `download-sbom` yourself, or pass `project-name` and
+`version` and let `fs-cli` resolve the label:
+
+```yaml
+- uses: FiniteStateInc/finite-state-actions/actions/download-sbom@v2
+  with:
+    api-token: ${{ secrets.FINITE_STATE_AUTH_TOKEN }}
+    project-name: my-app
+    version: v1.2.3
+```
+
+A `version-id` from an upstream step wins over `project-name`/`version`, so that form is
+for a job that exports an SBOM without scanning anything first.
 
 ### Wait for the scan before exporting
 
@@ -327,7 +339,7 @@ Any fs-report flag without a dedicated input — `--min-severity`, `--scan-type`
 
 Actions pass data via step outputs and environment variables. The `setup` action exports `FINITE_STATE_AUTH_TOKEN` and `FINITE_STATE_DOMAIN` as environment variables for the entire job.
 
-`setup` is optional for `scan`, `upload` and `download-sbom`, which accept `api-token`/`domain` directly (`scan` and `upload` also take `project-name`) and install `fs-cli` when it is not already on `PATH`. Every other action requires `setup`.
+`setup` is optional for `scan`, `upload` and `download-sbom`, which accept `api-token`/`domain`/`project-name` directly and install `fs-cli` when it is not already on `PATH`. Every other action requires `setup`.
 
 `scan` and `upload` also export that context themselves, so a later step inherits the token and domain without repeating them — the same environment variables `setup` writes. Both read the project and version IDs back from fs-cli's output and export those too, as `FINITE_STATE_PROJECT_ID` and `FINITE_STATE_VERSION_ID` plus matching step outputs. That is what lets `download-sbom` follow a `scan` with no inputs of its own.
 

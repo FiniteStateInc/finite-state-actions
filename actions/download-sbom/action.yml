@@ -12,7 +12,13 @@ inputs:
     description: 'Finite State platform domain. Defaults to the setup context, then app.finitestate.io.'
     required: false
   version-id:
-    description: 'Version ID override (falls back to setup context)'
+    description: 'Version ID override (falls back to setup context). Skips the name lookups.'
+    required: false
+  project-name:
+    description: 'Project name, resolved by fs-cli. Used with version when no version-id is known. Falls back to the setup context.'
+    required: false
+  version:
+    description: 'Version label, resolved by fs-cli against the version name or number. Requires project-name (or a setup context carrying the project). Ignored when version-id is set.'
     required: false
   format:
     description: 'SBOM format: cyclonedx or spdx'
