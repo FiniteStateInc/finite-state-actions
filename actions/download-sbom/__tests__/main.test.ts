@@ -59,6 +59,9 @@ vi.mock('@finite-state/core', async () => {
   // quoteExecPath comes from source too: a stubbed quoting rule would assert
   // nothing about the Windows path splitting it exists to prevent.
   const { quoteExecPath } = await import('../../../packages/core/src/exec-path')
+  // Real too: whether a GHES refusal fails the step or only warns is the
+  // behaviour under test in the artifact cases.
+  const { uploadArtifactUnlessGhes } = await import('../../../packages/core/src/artifact')
   return {
     FsClient: vi.fn().mockImplementation(() => ({})),
     ensureFsCli: vi.fn(async () => '/tmp/fs-cli/fs-cli'),
@@ -66,6 +69,7 @@ vi.mock('@finite-state/core', async () => {
     readSetupContext: vi.fn(),
     normalizeSbomFormat,
     timeoutSecondsToMinutes,
+    uploadArtifactUnlessGhes,
   }
 })
 
@@ -166,6 +170,36 @@ describe('download-sbom action', () => {
     )
 
     expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('warns instead of failing when GHES refuses the artifact upload', async () => {
+    // What the customer hit: fs-cli exported 948 components and wrote the file,
+    // then @actions/artifact refused before sending anything and took the whole
+    // step down with it.
+    const ghes = new Error(
+      '@actions/artifact v2.0.0+, upload-artifact@v4+ and download-artifact@v4+ are not currently supported on GHES.',
+    )
+    ghes.name = 'GHESNotSupportedError'
+    mockUploadArtifact.mockRejectedValue(ghes)
+
+    await run()
+
+    expect(core.setFailed).not.toHaveBeenCalled()
+    // The export still counts: the SBOM is on disk and the outputs point at it.
+    expect(mockRenameSync).toHaveBeenCalledWith('sbom.json.part', 'sbom.json')
+    expect(core.setOutput).toHaveBeenCalledWith('file', 'sbom.json')
+    expect(core.warning).toHaveBeenCalledWith(
+      expect.stringContaining('not currently supported on GHES'),
+      { title: 'Artifact upload unsupported on GHES' },
+    )
+  })
+
+  it('still fails when the artifact upload fails for any other reason', async () => {
+    mockUploadArtifact.mockRejectedValue(new Error('ECONNRESET'))
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith('ECONNRESET')
   })
 
   it('passes include-vex=false through to fs-cli', async () => {

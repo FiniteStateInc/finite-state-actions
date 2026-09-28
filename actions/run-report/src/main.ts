@@ -3,7 +3,11 @@ import * as exec from '@actions/exec'
 import { readdirSync, statSync } from 'fs'
 import { join } from 'path'
 import { DefaultArtifactClient } from '@actions/artifact'
-import { readSetupContext, parseReportDirectory } from '@finite-state/core'
+import {
+  readSetupContext,
+  parseReportDirectory,
+  uploadArtifactUnlessGhes,
+} from '@finite-state/core'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -184,10 +188,16 @@ export async function run(): Promise<void> {
     const artifactName = `fs-report-${Date.now()}`
     const files = collectFiles(outputDir)
 
+    // Through core's helper, same as download-sbom: on GHES @actions/artifact
+    // v2 refuses outright, and the report files are already in the directory
+    // named by the `report-dir` output.
     if (files.length > 0) {
-      const artifactClient = new DefaultArtifactClient()
-      await artifactClient.uploadArtifact(artifactName, files, outputDir)
-      core.info(`Uploaded ${files.length} report file(s) as artifact: ${artifactName}`)
+      const uploaded = await uploadArtifactUnlessGhes(artifactName, () =>
+        new DefaultArtifactClient().uploadArtifact(artifactName, files, outputDir),
+      )
+      if (uploaded) {
+        core.info(`Uploaded ${files.length} report file(s) as artifact: ${artifactName}`)
+      }
     } else {
       core.warning(`No report files found in ${outputDir} to upload as artifact`)
     }

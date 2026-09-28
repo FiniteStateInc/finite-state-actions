@@ -10,6 +10,7 @@ import {
   quoteExecPath,
   readSetupContext,
   timeoutSecondsToMinutes,
+  uploadArtifactUnlessGhes,
 } from '@finite-state/core'
 import type { SbomFormat } from '@finite-state/core'
 
@@ -374,10 +375,16 @@ export async function run(): Promise<void> {
     core.info(`SBOM contains ${componentCount} component(s)`)
 
     // ── Upload artifact ──────────────────────────────────────────────────────
+    // Through core's helper so a GHES runner, where @actions/artifact v2 cannot
+    // upload at all, warns instead of failing a step whose SBOM is already on
+    // disk and named in the `file` output.
     if (uploadArtifact) {
-      const artifactClient = new DefaultArtifactClient()
-      await artifactClient.uploadArtifact(artifactName, [outputFile], outputDir || '.')
-      core.info(`Uploaded SBOM as artifact: ${artifactName}`)
+      const uploaded = await uploadArtifactUnlessGhes(artifactName, () =>
+        new DefaultArtifactClient().uploadArtifact(artifactName, [outputFile], outputDir || '.'),
+      )
+      if (uploaded) {
+        core.info(`Uploaded SBOM as artifact: ${artifactName}`)
+      }
     }
   } catch (err) {
     core.setFailed(err instanceof Error ? err.message : String(err))

@@ -59,6 +59,27 @@ The proxy must allow `CONNECT` — the actions tunnel through it rather than sen
 absolute-form requests. For a proxy that needs credentials, put them in the URL
 (`http://user:pass@proxy.corp.example:3128`); the log line strips them.
 
+### GitHub Enterprise Server
+
+Everything works on GHES except workflow artifacts: `@actions/artifact` v2, which
+`download-sbom` and `run-report` use, refuses to upload there, and so does
+`actions/upload-artifact@v4`. Both actions log a warning and carry on rather than
+failing a step whose real work is done — the SBOM and the report files are on the
+runner, named by the `file` and `report-dir` outputs.
+
+To keep the artifacts, upload them yourself with the v3 action:
+
+```yaml
+- id: sbom
+  uses: FiniteStateInc/finite-state-actions/actions/download-sbom@v2
+  with:
+    upload-artifact: false
+- uses: actions/upload-artifact@v3
+  with:
+    name: finite-state-sbom
+    path: ${{ steps.sbom.outputs.file }}
+```
+
 #### Proxies that inspect TLS
 
 A proxy that terminates TLS re-signs the platform's certificate with a corporate CA.

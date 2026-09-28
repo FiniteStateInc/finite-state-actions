@@ -42,7 +42,7 @@ inputs:
     required: false
     default: 'sbom.json'
   upload-artifact:
-    description: 'Upload the SBOM as a workflow artifact'
+    description: 'Upload the SBOM as a workflow artifact. On GitHub Enterprise Server the upload is skipped with a warning — @actions/artifact v2 does not support GHES — and the export itself still succeeds; the file output points at the SBOM on the runner.'
     required: false
     default: 'true'
   artifact-name:

@@ -67928,6 +67928,94 @@ function wrappy (fn, cb) {
 
 /***/ }),
 
+/***/ 5218:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.uploadArtifactUnlessGhes = uploadArtifactUnlessGhes;
+const core = __importStar(__nccwpck_require__(4442));
+/**
+ * Runs an artifact upload, downgrading GitHub Enterprise Server's refusal to a
+ * warning.
+ *
+ * `@actions/artifact` v2 throws `GHESNotSupportedError` before it sends
+ * anything when the runner is talking to GHES, and no version of it works
+ * there — v2 is the only line still maintained, and `upload-artifact@v4`
+ * carries the same limit. So on GHES this is not a transient failure to retry
+ * or a misconfiguration to fix: the upload cannot happen at all. Failing the
+ * step for it means a GHES job can never go green even though the work it
+ * asked for — the SBOM, the report — completed and the files are sitting on
+ * the runner, reachable through each action's path output.
+ *
+ * Every other upload error still throws. A network failure, a name collision
+ * or a missing file is worth a red run, and swallowing those would turn a real
+ * "your artifact is not there" into silence.
+ *
+ * The upload arrives as a thunk rather than this module constructing the
+ * client itself, so core keeps no dependency on `@actions/artifact`. Only two
+ * of the eight actions upload anything, and core is re-exported wholesale into
+ * every bundle: importing the package here would add ~3.6 MB to the six that
+ * never call it.
+ *
+ * Returns whether the upload happened, for callers that report it.
+ */
+async function uploadArtifactUnlessGhes(name, upload) {
+    try {
+        await upload();
+        return true;
+    }
+    catch (err) {
+        // Matched on `name`, not `instanceof`: the class is not exported from the
+        // package's entry point, and the action and core could otherwise resolve
+        // two copies of it.
+        if (err instanceof Error && err.name === 'GHESNotSupportedError') {
+            core.warning(`Artifact "${name}" was not uploaded: ${err.message} The files are still on the ` +
+                'runner — upload them with actions/upload-artifact@v3, which GHES does support, or ' +
+                'turn the upload off in this step to drop the warning.', { title: 'Artifact upload unsupported on GHES' });
+            return false;
+        }
+        throw err;
+    }
+}
+//# sourceMappingURL=artifact.js.map
+
+/***/ }),
+
 /***/ 2447:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -68736,6 +68824,7 @@ __exportStar(__nccwpck_require__(4893), exports);
 __exportStar(__nccwpck_require__(8993), exports);
 __exportStar(__nccwpck_require__(9425), exports);
 __exportStar(__nccwpck_require__(9941), exports);
+__exportStar(__nccwpck_require__(5218), exports);
 //# sourceMappingURL=index.js.map
 
 /***/ }),

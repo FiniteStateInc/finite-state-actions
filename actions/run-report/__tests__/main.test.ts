@@ -40,10 +40,16 @@ vi.mock('fs', async () => {
 
 // ── Mock @finite-state/core ────────────────────────────────────────────────────
 
-vi.mock('@finite-state/core', () => ({
-  parseReportDirectory: vi.fn(),
-  readSetupContext: vi.fn(),
-}))
+vi.mock('@finite-state/core', async () => {
+  // Real: whether a GHES refusal fails the step or only warns is the behaviour
+  // under test in the artifact case.
+  const { uploadArtifactUnlessGhes } = await import('../../../packages/core/src/artifact')
+  return {
+    parseReportDirectory: vi.fn(),
+    readSetupContext: vi.fn(),
+    uploadArtifactUnlessGhes,
+  }
+})
 
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
 
