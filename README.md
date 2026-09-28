@@ -75,6 +75,10 @@ To keep the artifacts, upload them yourself with the v3 action:
   with:
     upload-artifact: false
 - uses: actions/upload-artifact@v3
+  env:
+    # v3 runs on node20, which rejects a node24-only NODE_OPTIONS outright.
+    # Only needed if the job sets one — see "Proxies that inspect TLS" above.
+    NODE_OPTIONS: ''
   with:
     name: finite-state-sbom
     path: ${{ steps.sbom.outputs.file }}
@@ -95,10 +99,23 @@ The actions run on `node24`, so the shortest fix is to let Node read the machine
 store — where the CA already is, or the proxy would break everything else on the runner:
 
 ```yaml
-env:
-  HTTPS_PROXY: http://proxy.corp.example:3128
-  NODE_OPTIONS: --use-system-ca
+- uses: FiniteStateInc/finite-state-actions/actions/setup@v2
+  env:
+    HTTPS_PROXY: http://proxy.corp.example:3128
+    NODE_OPTIONS: --use-system-ca
 ```
+
+Put `NODE_OPTIONS` on the Finite State steps, not on the job. `--use-system-ca` arrived in
+Node 22.15, and Node rejects an option it does not know rather than ignoring it — so a
+job-wide setting kills any step still running on `node20`, before that step's own code
+starts:
+
+```
+C:\actions-runner\externals\node20\bin\node.exe: --use-system-ca is not allowed in NODE_OPTIONS
+```
+
+`actions/upload-artifact@v3` is the one to watch: it is `node20`, and it is what the GHES
+workaround below uses. `HTTPS_PROXY` is safe job-wide; only `NODE_OPTIONS` needs scoping.
 
 If the CA is only in a user store, or the runner is Linux, point both processes at the PEM
 instead. `NODE_EXTRA_CA_CERTS` covers the actions; `SSL_CERT_FILE` covers fs-cli, which is
