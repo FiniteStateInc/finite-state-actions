@@ -59,6 +59,43 @@ The proxy must allow `CONNECT` — the actions tunnel through it rather than sen
 absolute-form requests. For a proxy that needs credentials, put them in the URL
 (`http://user:pass@proxy.corp.example:3128`); the log line strips them.
 
+#### Proxies that inspect TLS
+
+A proxy that terminates TLS re-signs the platform's certificate with a corporate CA.
+Node trusts its own bundled CA list, not the machine's, so the request fails even though
+a browser on the same host is fine:
+
+```
+Error: Request to https://app.finitestate.io/api/public/v0/cli/download?os=windows&arch=amd64
+failed: fetch failed: unable to get local issuer certificate (UNABLE_TO_GET_ISSUER_CERT_LOCALLY)
+```
+
+The actions run on `node24`, so the shortest fix is to let Node read the machine's trust
+store — where the CA already is, or the proxy would break everything else on the runner:
+
+```yaml
+env:
+  HTTPS_PROXY: http://proxy.corp.example:3128
+  NODE_OPTIONS: --use-system-ca
+```
+
+If the CA is only in a user store, or the runner is Linux, point both processes at the PEM
+instead. `NODE_EXTRA_CA_CERTS` covers the actions; `SSL_CERT_FILE` covers fs-cli, which is
+Go and has its own trust store on Linux (on Windows and macOS it uses the system one):
+
+```yaml
+env:
+  NODE_EXTRA_CA_CERTS: /etc/ssl/certs/corp-root.pem
+  SSL_CERT_FILE: /etc/ssl/certs/corp-root.pem
+```
+
+Fix it for both: the download that fails first is Node's, but fs-cli makes its own platform
+calls later in the same job and hits the same CA.
+
+Exempting the platform domain from inspection on the proxy works too, and is worth asking
+for. `NODE_TLS_REJECT_UNAUTHORIZED=0` also makes the error go away, by disabling
+certificate verification for every request the action makes — don't.
+
 ### Usage
 
 Since the actions live in a monorepo, reference them with the full path:
